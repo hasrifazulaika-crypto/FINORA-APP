@@ -138,8 +138,22 @@ def fetch_analyses():
     df = pd.read_sql_query("SELECT a.id, f.filename, a.mode, a.created_at FROM analyses a JOIN files f ON a.file_id = f.id ORDER BY a.created_at DESC", conn)
     conn.close(); return df
 
+def fetch_analysis_by_id(aid):
+    conn = get_conn()
+    df = pd.read_sql_query("""
+        SELECT a.id, a.summary_json, f.filename 
+        FROM analyses a JOIN files f ON a.file_id = f.id 
+        WHERE a.id=?
+    """, conn, params=(aid,))
+    conn.close(); return df.iloc[0] if not df.empty else None
+
+def fetch_findings(aid):
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM findings WHERE analysis_id=?", conn, params=(aid,))
+    conn.close(); return df
+
 # ============================================================
-# AI ENGINE
+# AI ENGINE (FIXED MODEL VERSION)
 # ============================================================
 def get_gemini_client():
     try:
@@ -161,7 +175,8 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
             yield "⚠️ API Key Gemini belum diatur di Secrets Streamlit."
             return
 
-        model_id = "gemini-1.5-flash"
+        # Menggunakan model stabil yang didukung penuh
+        model_id = "gemini-2.5-flash"
 
         full_prompt = f"""
         Kamu adalah FINORA AI, {system_role}.
@@ -180,10 +195,10 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
                 yield chunk.text
 
     except Exception as e:
-        yield f"\n\n⚠️ Terjadi kesalahan: {str(e)}"
+        yield f"\n\n⚠️ Terjadi kesalahan koneksi AI: {str(e)}"
 
 # ============================================================
-# AUDIT ENGINE V5
+# AUDIT ENGINE & CASH FLOW ENGINE
 # ============================================================
 def auto_detect_columns(df):
     mapping = {"date": None, "amount": None, "desc": None, "debit": None, "credit": None, "budget": None, "invoice": None, "cash_in": None, "cash_out": None}
@@ -278,13 +293,8 @@ def audit_outliers_iqr(df, amount_col):
         except: pass
     return findings, flagged
 
-# ============================================================
-# CASH FLOW INTELLIGENCE ENGINE (FITUR BARU SESUAI KONSEP)
-# ============================================================
 def process_cash_flow_data(df, date_col, desc_col, in_col, out_col, initial_balance=0.0):
     pdf = df.copy()
-    
-    # 1. Konversi Tanggal & Urutkan
     if date_col:
         pdf[date_col] = pd.to_datetime(pdf[date_col], errors="coerce")
         pdf = pdf.sort_values(by=date_col).reset_index(drop=True)
@@ -292,24 +302,20 @@ def process_cash_flow_data(df, date_col, desc_col, in_col, out_col, initial_bala
     else:
         pdf['Bulan'] = 'Tidak Diketahui'
 
-    # 2. Ambil Nilai Masuk & Keluar
     pdf['Kas Masuk'] = pd.to_numeric(pdf[in_col], errors="coerce").fillna(0.0) if in_col else 0.0
     pdf['Kas Keluar'] = pd.to_numeric(pdf[out_col], errors="coerce").fillna(0.0) if out_col else 0.0
     pdf['Net Cash Flow'] = pdf['Kas Masuk'] - pdf['Kas Keluar']
-
-    # 3. Running Balance (Saldo Berjalan)
     pdf['Running Balance'] = initial_balance + pdf['Net Cash Flow'].cumsum()
 
-    # 4. Kategorisasi Otomatis Berdasarkan Kata Kunci Deskripsi
     def auto_categorize(text):
         t = str(text).lower()
-        if any(k in t for k in ["bensin", "bbm", "tol", "parkir", "transport", "travel", "akomodasi"]): return "Transportasi & Perjalanan"
-        elif any(k in t for k in ["gaji", "honor", "tunjangan", "payroll", "upah", "salary"]): return "Gaji & SDM"
-        elif any(k in t for k in ["listrik", "air", "internet", "wifi", "telkom", "pulsa", "utility", "pln"]): return "Utilitas & Kantor"
-        elif any(k in t for k in ["sewa", "rent", "gedung", "kantor"]): return "Sewa & Fasilitas"
-        elif any(k in t for k in ["makan", "konsumsi", "snack", "f&b", "restoran"]): return "Konsumsi"
-        elif any(k in t for k in ["pajak", "tax", "retribusi"]): return "Pajak & Legal"
-        elif any(k in t for k in ["penjualan", "sales", "pendapatan", "revenue", "terima", "inflow", "setoran"]): return "Penerimaan / Penjualan"
+        if any(k in t for k in ["bensin", "bbm", "tol", "parkir", "transport", "travel"]): return "Transportasi & Perjalanan"
+        elif any(k in t for k in ["gaji", "honor", "tunjangan", "payroll", "salary"]): return "Gaji & SDM"
+        elif any(k in t for k in ["listrik", "air", "internet", "wifi", "utility", "pln"]): return "Utilitas & Kantor"
+        elif any(k in t for k in ["sewa", "rent", "gedung"]): return "Sewa & Fasilitas"
+        elif any(k in t for k in ["makan", "konsumsi", "snack", "f&b"]): return "Konsumsi"
+        elif any(k in t for k in ["pajak", "tax"]): return "Pajak & Legal"
+        elif any(k in t for k in ["penjualan", "sales", "pendapatan", "revenue", "terima"]): return "Penerimaan / Penjualan"
         else: return "Operasional Lainnya"
 
     if desc_col:
@@ -317,21 +323,16 @@ def process_cash_flow_data(df, date_col, desc_col, in_col, out_col, initial_bala
     else:
         pdf['Kategori Pengeluaran'] = "Umum"
 
-    # 5. Hitung Burn Rate & Runway
     total_out = pdf['Kas Keluar'].sum()
+    months_count = 1.0
     if date_col and not pdf[date_col].dropna().empty:
-        min_date = pdf[date_col].min()
-        max_date = pdf[date_col].max()
-        diff_days = (max_date - min_date).days
+        diff_days = (pdf[date_col].max() - pdf[date_col].min()).days
         months_count = max(1, diff_days / 30.44)
-    else:
-        months_count = 1.0
 
     monthly_burn_rate = total_out / months_count
     current_saldo = pdf['Running Balance'].iloc[-1] if not pdf.empty else initial_balance
     cash_runway_months = round(current_saldo / monthly_burn_rate, 1) if monthly_burn_rate > 0 else 99.9
 
-    # 6. Deteksi Anomali Kas (Pengeluaran > 3x Rata-rata)
     out_only = pdf[pdf['Kas Keluar'] > 0]['Kas Keluar']
     anomalies_df = pd.DataFrame()
     if not out_only.empty:
@@ -348,24 +349,17 @@ def process_cash_flow_data(df, date_col, desc_col, in_col, out_col, initial_bala
         "monthly_burn_rate": monthly_burn_rate,
         "cash_runway_months": cash_runway_months
     }
-
     return pdf, metrics, anomalies_df
 
-# ============================================================
-# SMART FINANCIAL ENGINE & EXPORT
-# ============================================================
 def auto_extract_financials(df, entity_type):
     results = {
         "pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0,
         "total_aset": 0.0, "total_liabilitas": 0.0, "ekuitas": 0.0,
         "real_pendapatan": 0.0, "ang_pendapatan": 0.0,
-        "real_belanja": 0.0, "ang_belanja": 0.0,
-        "surplus": 0.0, "pad": 0.0
+        "real_belanja": 0.0, "ang_belanja": 0.0, "surplus": 0.0, "pad": 0.0
     }
-    
     str_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
     num_cols = df.select_dtypes(include=['number', 'float', 'int']).columns.tolist()
-    
     if not str_cols or not num_cols: return results
 
     name_col = str_cols[0] 
@@ -374,7 +368,6 @@ def auto_extract_financials(df, entity_type):
         c_str = str(c).lower()
         if 'realisasi' in c_str or 'real' in c_str: real_col = c
         elif 'anggaran' in c_str or 'ang' in c_str or 'pagu' in c_str: ang_col = c
-    
     if not real_col and len(num_cols) > 0: real_col = num_cols[0]
     if not ang_col and len(num_cols) > 1: ang_col = num_cols[1]
 
@@ -393,34 +386,21 @@ def auto_extract_financials(df, entity_type):
         return 0.0
 
     if "Pemerintahan" in entity_type:
-        real_p = get_total(real_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
-        if real_p == 0: real_p = get_total(real_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
-        ang_p = get_total(ang_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
-        if ang_p == 0: ang_p = get_total(ang_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
-
-        real_b = get_total(real_col, ['total belanja', 'jumlah belanja', 'belanja daerah', 'belanja'])
-        if real_b == 0: real_b = get_total(real_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
-        ang_b = get_total(ang_col, ['total belanja', 'jumlah belanja', 'belanja daerah', 'belanja'])
-        if ang_b == 0: ang_b = get_total(ang_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
-
-        pad = get_total(real_col, ['pendapatan asli daerah', 'jumlah pendapatan asli daerah', 'total pendapatan asli daerah', 'pad'], ['pendapatan asli daerah'])
-        surplus = get_total(real_col, [], ['surplus', 'defisit'])
-        if surplus == 0: surplus = real_p - real_b
-
-        results.update({
-            "real_pendapatan": real_p, "ang_pendapatan": ang_p,
-            "real_belanja": real_b, "ang_belanja": ang_b,
-            "pad": pad, "surplus": surplus
-        })
+        real_p = get_total(real_col, ['total pendapatan', 'pendapatan daerah', 'pendapatan'])
+        ang_p = get_total(ang_col, ['total pendapatan', 'pendapatan daerah', 'pendapatan'])
+        real_b = get_total(real_col, ['total belanja', 'belanja daerah', 'belanja'])
+        ang_b = get_total(ang_col, ['total belanja', 'belanja daerah', 'belanja'])
+        pad = get_total(real_col, ['pendapatan asli daerah', 'pad'], ['pad'])
+        surplus = real_p - real_b
+        results.update({"real_pendapatan": real_p, "ang_pendapatan": ang_p, "real_belanja": real_b, "ang_belanja": ang_b, "pad": pad, "surplus": surplus})
     else:
-        results["pendapatan"] = get_total(real_col, ['total pendapatan', 'pendapatan', 'total penjualan', 'penjualan'], ['pendapatan', 'penjualan', 'revenue'])
-        results["laba"] = get_total(real_col, ['laba bersih', 'laba tahun berjalan'], ['laba bersih', 'net income'])
-        results["total_aset"] = get_total(real_col, ['total aset', 'jumlah aset'], ['total aset', 'total asset'])
-        results["ekuitas"] = get_total(real_col, ['total ekuitas', 'total modal'], ['total ekuitas', 'total equity'])
-        results["total_liabilitas"] = get_total(real_col, ['total liabilitas', 'total utang'], ['total liabilitas', 'total utang'])
-        results["aset_lancar"] = get_total(real_col, ['total aset lancar'], ['aset lancar', 'current asset'])
-        results["liabilitas_lancar"] = get_total(real_col, ['total liabilitas jangka pendek', 'total utang lancar'], ['liabilitas jangka pendek', 'utang lancar', 'current liab'])
-
+        results["pendapatan"] = get_total(real_col, ['total pendapatan', 'pendapatan', 'penjualan'], ['pendapatan', 'penjualan'])
+        results["laba"] = get_total(real_col, ['laba bersih', 'laba tahun berjalan'], ['laba bersih'])
+        results["total_aset"] = get_total(real_col, ['total aset', 'jumlah aset'], ['total aset'])
+        results["ekuitas"] = get_total(real_col, ['total ekuitas', 'total modal'], ['ekuitas'])
+        results["total_liabilitas"] = get_total(real_col, ['total liabilitas', 'total utang'], ['liabilitas'])
+        results["aset_lancar"] = get_total(real_col, ['total aset lancar'], ['aset lancar'])
+        results["liabilitas_lancar"] = get_total(real_col, ['total liabilitas jangka pendek'], ['liabilitas jangka pendek'])
     return results
 
 def hitung_rasio_dari_nilai(nilai, entity_type):
@@ -431,7 +411,6 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
         real_b = nilai.get("real_belanja", 0)
         ang_b = nilai.get("ang_belanja", 0)
         pad = nilai.get("pad", 0)
-        
         rasio["Efektivitas Pendapatan (%)"] = round((real_p / ang_p) * 100, 2) if ang_p > 0 else 0.0
         rasio["Efisiensi Belanja (%)"] = round((real_b / ang_b) * 100, 2) if ang_b > 0 else 0.0
         rasio["Kemandirian Daerah (%)"] = round((pad / real_p) * 100, 2) if real_p > 0 else 0.0
@@ -443,7 +422,6 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
         total_aset = nilai.get("total_aset", 0)
         total_liab = nilai.get("total_liabilitas", 0)
         ekuitas = nilai.get("ekuitas", 0)
-
         rasio["Current Ratio (x)"] = round(aset_lancar / liab_lancar, 2) if liab_lancar > 0 else 0.0
         rasio["Net Profit Margin (%)"] = round((laba / pendapatan) * 100, 2) if pendapatan > 0 else 0.0
         rasio["ROA (%)"] = round((laba / total_aset) * 100, 2) if total_aset > 0 else 0.0
@@ -452,402 +430,273 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
     return rasio
 
 def get_detailed_insight(ratio_name, val):
-    return f"<b>Kondisi:</b> Nilai indikator {ratio_name} tercatat sebesar {val}.<br><b>Rekomendasi:</b> Evaluasi berkala sesuai standar operasional keuangan."
+    return f"<b>Kondisi:</b> Indikator {ratio_name} tercatat sebesar {val}. Evaluasi secara berkala untuk menjaga stabilitas keuangan."
 
-def generate_pdf_report(filename, entity_type, summary_data, findings_list, rasio_dict):
+def generate_excel(flagged_data_dict, findings_list):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df_findings = pd.DataFrame(findings_list)
+        if not df_findings.empty:
+            df_findings.to_excel(writer, sheet_name="Ringkasan Temuan", index=False)
+        for modul, df_flag in flagged_data_dict.items():
+            if not df_flag.empty:
+                df_flag.to_excel(writer, sheet_name=modul[:31], index=False)
+    buffer.seek(0)
+    return buffer
+
+def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    elements = []
     styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor("#7A1F3D"), spaceAfter=6)
-    sub_style = ParagraphStyle('SubStyle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=16)
-    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor("#7A1F3D"), spaceBefore=12, spaceAfter=8)
+    title_style = ParagraphStyle(name='Title', parent=styles['Heading1'], textColor=colors.HexColor('#7A1F3D'), alignment=1)
+    heading_style = ParagraphStyle(name='Heading', parent=styles['Heading2'], textColor=colors.HexColor('#FF5C8B'))
     normal_style = styles['Normal']
 
-    elements = []
-    elements.append(Paragraph("LAPORAN HASIL AUDIT & KEUANGAN FINORA AI", title_style))
-    elements.append(Paragraph(f"File: {filename} | Entitas: {entity_type} | Tanggal: {datetime.now().strftime('%d %B %Y')}", sub_style))
-
-    elements.append(Paragraph("1. Ringkasan Eksekutif", h2_style))
-    summary_table_data = [["Metrik", "Nilai"]]
-    for k, v in summary_data.items():
-        val_str = format_rupiah(v) if isinstance(v, (int, float)) else str(v)
-        summary_table_data.append([str(k), val_str])
-
-    t_sum = Table(summary_table_data, colWidths=[250, 240])
-    t_sum.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#7A1F3D")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-        ('PADDING', (0, 0), (-1, -1), 6),
-    ]))
-    elements.append(t_sum)
-    elements.append(Spacer(1, 12))
-
-    if rasio_dict:
-        elements.append(Paragraph("2. Analisis Rasio Keuangan", h2_style))
-        rasio_table_data = [["Indikator Rasio", "Hasil"]]
-        for k, v in rasio_dict.items():
-            rasio_table_data.append([k, f"{v}"])
-        t_rasio = Table(rasio_table_data, colWidths=[250, 240])
-        t_rasio.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#FF5C8B")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-            ('PADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(t_rasio)
-        elements.append(Spacer(1, 12))
-
-    elements.append(Paragraph("3. Rincian Temuan Audit", h2_style))
-    if not findings_list:
-        elements.append(Paragraph("Tidak ditemukan anomali signifikan.", normal_style))
-    else:
-        find_table_data = [["Modul", "Risiko", "Temuan", "Rekomendasi"]]
-        for f in findings_list:
-            find_table_data.append([
-                Paragraph(f["module"], normal_style),
-                Paragraph(f["risk_level"], normal_style),
-                Paragraph(f["title"], normal_style),
-                Paragraph(f["recommendation"], normal_style)
-            ])
-        t_find = Table(find_table_data, colWidths=[100, 65, 160, 165])
-        t_find.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#7A1F3D")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-            ('PADDING', (0, 0), (-1, -1), 'TOP'),
-            ('PADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(t_find)
-
+    elements.append(Paragraph("KERTAS KERJA AUDIT (KKA)", title_style))
+    elements.append(Paragraph("FINORA Financial Intelligence System", normal_style))
+    elements.append(Spacer(1, 10))
+    header_data = [
+        ["Nama Entitas", f": {entitas or '-'}"],
+        ["Periode Audit", f": {periode or '-'}"],
+        ["Nama File", f": {filename}"],
+        ["Skor Risiko", f": {score}/100"]
+    ]
+    t_header = Table(header_data, colWidths=[120, 350])
+    elements.append(t_header)
+    elements.append(Spacer(1, 20))
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
 # ============================================================
-# MAIN UI APPLICATION
+# KONTROL NAVIGASI SESUAI PERMINTAAN ANDA
 # ============================================================
-logo_html = f'<img src="data:image/png;base64,{LOGO_B64}" width="42" style="margin-right:12px; border-radius:8px;">' if LOGO_B64 else "📊 "
-st.markdown(f"""
-<div class="finora-header">
-    <h1>{logo_html}FINORA AI — Pro Audit & Financial Intelligence</h1>
-    <p>Sistem Audit Otomatis, Cash Flow Intelligence, Analisis Rasio & Asisten Auditor AI</p>
-</div>
-""", unsafe_allow_html=True)
+if 'app_started' not in st.session_state:
+    st.session_state.app_started = False
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.header("⚙️ Pengaturan & Modul")
-    entity_type = st.selectbox(
-        "Jenis Entitas",
-        ["Perusahaan / UMKM (Komersial)", "Instansi Pemerintahan / Sektor Publik"]
-    )
-    audit_mode = st.radio(
-        "Mode Analisis Utama",
-        ["Audit Transaksi & Jurnal", "Analisis Laporan Keuangan", "Cash Flow Intelligence (Arus Kas)", "Kombinasi Lengkap"]
-    )
-    
-    st.markdown("---")
-    st.subheader("🧩 Modul Audit Aktif")
-    mod_empty = st.checkbox("Kelengkapan Data (Kosong/Null)", value=True)
-    mod_dup = st.checkbox("Deteksi Duplikasi (Double Entry)", value=True)
-    mod_neg = st.checkbox("Observasi Nilai Negatif", value=True)
-    mod_over = st.checkbox("Cek Overbudget (Realisasi > Pagu)", value=True)
-    mod_wknd = st.checkbox("Transaksi Akhir Pekan (Weekend)", value=True)
-    mod_word = st.checkbox("Kata Kunci Sensitif (Void/Adj)", value=True)
-    mod_iqr = st.checkbox("Deteksi Outlier Statistik (IQR)", value=True)
-
-    st.markdown("---")
-    st.subheader("🗂️ Riwayat Analisis")
-    history_df = fetch_analyses()
-    if not history_df.empty:
-        selected_hist = st.selectbox(
-            "Lihat Riwayat Tersimpan",
-            options=["-- Pilih Riwayat --"] + [f"#{r['id']} - {r['filename']} ({r['created_at'][:10]})" for _, r in history_df.iterrows()]
-        )
-    else:
-        st.caption("Belum ada riwayat tersimpan.")
-
-# --- FILE UPLOADER ---
-uploaded_file = st.file_uploader("📂 Unggah File Laporan Keuangan / Mutasi Kas / Buku Besar (Excel / CSV)", type=["xlsx", "xls", "csv"])
-
-if uploaded_file is not None:
-    file_bytes = uploaded_file.getvalue()
-    file_id = save_file(uploaded_file.name, file_bytes)
-
-    try:
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(file_bytes))
+if not st.session_state.app_started:
+    # --- 1. TAMPILAN AWAL (LANDING PAGE) ---
+    st.markdown("""<style>[data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none; }</style>""", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        if os.path.exists(LOGO_FILENAME):
+            st.image(LOGO_FILENAME, width=250)
         else:
-            excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
-            sheet_name = st.selectbox("Pilih Sheet Excel:", excel_file.sheet_names) if len(excel_file.sheet_names) > 1 else excel_file.sheet_names[0]
-            df = pd.read_excel(excel_file, sheet_name=sheet_name)
-    except Exception as e:
-        st.error(f"Gagal membaca file: {e}")
-        st.stop()
+            st.markdown("<h1 style='text-align:center; font-size: 5rem;'>F</h1>", unsafe_allow_html=True)
 
-    st.success(f"Berhasil memuat **{uploaded_file.name}** ({len(df):,} baris, {len(df.columns)} kolom).")
+    st.markdown("""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #FFF0F4 0%, #FFF5E8 100%); border-radius: 20px; margin-bottom: 40px; border: 2px solid #FF5C8B; box-shadow: 0 10px 30px rgba(255, 92, 139, 0.15);">
+        <h1 style="color: #7A1F3D; font-size: 3.5rem; margin-bottom: 15px; font-weight: 800;">FINORA AI</h1>
+        <p style="color: #2D1B24; font-size: 1.3rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+            Platform Kecerdasan Finansial untuk mendeteksi anomali, analisis rasio laporan keuangan, serta monitoring <b>Cash Flow Intelligence</b> secara otomatis.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with st.expander("👁️ Pratinjau Data Mentah (10 Baris Pertama)", expanded=False):
-        st.dataframe(df.head(10), use_container_width=True)
-
-    # Deteksi & Mapping Kolom
-    auto_map = auto_detect_columns(df)
-    cols_options = [None] + list(df.columns)
-
-    with st.expander("🛠️ Pemetaan Kolom Otomatis (Sesuaikan jika perlu)", expanded=False):
-        c1, c2, c3, c4 = st.columns(4)
-        col_date = c1.selectbox("Kolom Tanggal", cols_options, index=cols_options.index(auto_map["date"]) if auto_map["date"] in cols_options else 0)
-        col_amount = c2.selectbox("Kolom Nominal / Realisasi", cols_options, index=cols_options.index(auto_map["amount"]) if auto_map["amount"] in cols_options else 0)
-        col_budget = c3.selectbox("Kolom Anggaran / Pagu", cols_options, index=cols_options.index(auto_map["budget"]) if auto_map["budget"] in cols_options else 0)
-        col_desc = c4.selectbox("Kolom Deskripsi / Akun", cols_options, index=cols_options.index(auto_map["desc"]) if auto_map["desc"] in cols_options else 0)
-
-        c5, c6 = st.columns(2)
-        col_cash_in = c5.selectbox("Kolom Kas Masuk / Debit (Opsional)", cols_options, index=cols_options.index(auto_map["cash_in"]) if auto_map["cash_in"] in cols_options else 0)
-        col_cash_out = c6.selectbox("Kolom Kas Keluar / Kredit (Opsional)", cols_options, index=cols_options.index(auto_map["cash_out"]) if auto_map["cash_out"] in cols_options else 0)
-
-    # Jalankan Engine Audit
-    all_findings = []
-    flagged_tables = {}
-    selected_modules = []
-
-    if mod_empty:
-        selected_modules.append("Kelengkapan Data")
-        f, flg = audit_empty(df, [col_date, col_amount, col_desc])
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Data Kosong"] = flg
-
-    if mod_dup:
-        selected_modules.append("Data Duplikat")
-        dup_cols = [c for c in [col_date, col_amount, col_desc] if c]
-        f, flg = audit_duplicates(df, dup_cols)
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Transaksi Duplikat"] = flg
-
-    if mod_neg:
-        selected_modules.append("Nilai Negatif")
-        f, flg = audit_negative(df, col_amount)
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Nilai Negatif"] = flg
-
-    if mod_over:
-        selected_modules.append("Overbudget")
-        f, flg = audit_overbudget(df, col_budget, col_amount)
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Overbudget"] = flg
-
-    if mod_wknd:
-        selected_modules.append("Transaksi Weekend")
-        f, flg = audit_weekend(df, col_date)
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Transaksi Weekend"] = flg
-
-    if mod_word:
-        selected_modules.append("Kata Kunci Mencurigakan")
-        f, flg = audit_suspicious_words(df, col_desc)
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Kata Kunci Mencurigakan"] = flg
-
-    if mod_iqr:
-        selected_modules.append("Outlier IQR")
-        f, flg = audit_outliers_iqr(df, col_amount)
-        all_findings.extend(f)
-        if not flg.empty: flagged_tables["Outlier Statistik"] = flg
-
-    # Jalankan Cash Flow Intelligence Engine
-    initial_cash = st.sidebar.number_input("Saldo Awal Kas (Rp)", value=0.0, step=1_000_000.0, format="%f")
-    cf_df, cf_metrics, cf_anomalies = process_cash_flow_data(df, col_date, col_desc, col_cash_in or col_amount, col_cash_out or col_amount, initial_cash)
-
-    # Ekstraksi Keuangan & Rasio
-    fin_values = auto_extract_financials(df, entity_type)
-    rasio_hasil = hitung_rasio_dari_nilai(fin_values, entity_type)
-
-    # TABS UTAMA (DITAMBAHKAN TAB CASH FLOW)
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🔍 Hasil Temuan Audit",
-        "💵 Cash Flow Intelligence",
-        "📈 Analisis Rasio & Keuangan",
-        "🤖 Konsultasi Auditor AI",
-        "📥 Simpan & Ekspor Laporan"
-    ])
-
-    # ---------------- TAB 1: TEMUAN AUDIT ----------------
-    with tab1:
-        high_risk = sum(1 for x in all_findings if x["risk_level"] == "Tinggi")
-        med_risk = sum(1 for x in all_findings if x["risk_level"] == "Sedang")
-        low_risk = sum(1 for x in all_findings if x["risk_level"] == "Rendah")
-
-        m1, m2, m3, m4 = st.columns(4)
-        with m1: metric_card("Total Baris Diperiksa", f"{len(df):,}")
-        with m2: metric_card("Temuan Risiko Tinggi", f"{high_risk}")
-        with m3: metric_card("Temuan Risiko Sedang", f"{med_risk}")
-        with m4: metric_card("Observasi Risiko Rendah", f"{low_risk}")
-
-        if not all_findings:
-            st.success("🎉 Tidak ditemukan anomali atau pelanggaran aturan pada modul audit yang dipilih.")
-        else:
-            st.subheader("Daftar Temuan Audit")
-            for idx, item in enumerate(all_findings, 1):
-                badge = "🔴" if item["risk_level"] == "Tinggi" else ("🟠" if item["risk_level"] == "Sedang" else "🟡")
-                st.markdown(f"""
-                <div class="insight-box">
-                    <h4>{badge} [{item['risk_level']}] {item['module']} — {item['title']}</h4>
-                    <p><b>Detail:</b> {item['detail']}</p>
-                    <p><b>Rekomendasi Audit:</b> {item['recommend'] if 'recommend' in item else item['recommendation']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.subheader("📋 Detail Baris Terindikasi (Flagged Rows)")
-            for tbl_name, tbl_df in flagged_tables.items():
-                with st.expander(f"Lihat Data: {tbl_name} ({len(tbl_df)} baris)"):
-                    st.dataframe(tbl_df, use_container_width=True)
-
-    # ---------------- TAB 2: CASH FLOW INTELLIGENCE (BARU) ----------------
-    with tab2:
-        st.subheader("💵 Analisis Arus Kas & Ketahanan Likuiditas (Cash Flow Intelligence)")
-        st.markdown("Fitur ini menganalisis saldo berjalan (*running balance*), tingkat pembakaran kas (*burn rate*), ketahanan kas (*cash runway*), serta deteksi anomali pengeluaran otomatis.")
-
-        # Kartu Metrik Likuiditas
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: metric_card("Saldo Kas Saat Ini", format_rupiah(cf_metrics["saldo_akhir"]), "Estimasi posisi kas terakhir berdasarkan transaksi masuk & keluar")
-        with c2: metric_card("Total Kas Masuk", format_rupiah(cf_metrics["total_masuk"]), "Akumulasi seluruh pemasukan")
-        with c3: metric_card("Total Kas Keluar", format_rupiah(cf_metrics["total_keluar"]), "Akumulasi seluruh pengeluaran")
-        with c4: 
-            runway_str = f"{cf_metrics['cash_runway_months']} Bulan" if cf_metrics['cash_runway_months'] < 99 else "Aman (>99 Bulan)"
-            metric_card("Cash Runway (Ketahanan)", runway_str, "Berapa lama uang Anda bertahan dengan rata-rata pengeluaran saat ini")
-
-        st.markdown("---")
-        c_chart1, c_chart2 = st.columns(2)
-
-        with c_chart1:
-            st.subheader("📈 Tren Saldo Berjalan (Running Balance)")
-            if col_date and not cf_df.empty:
-                fig_balance = px.line(cf_df, x=col_date, y="Running Balance", title="Grafik Saldo Kas dari Waktu ke Waktu", markers=True, color_discrete_sequence=["#7A1F3D"])
-                fig_balance.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_balance, use_container_width=True)
-            else:
-                st.info("Pilih kolom tanggal yang valid untuk melihat grafik tren saldo berjalan.")
-
-        with c_chart2:
-            st.subheader("🥧 Proporsi Pengeluaran Berdasarkan Kategori")
-            if "Kategori Pengeluaran" in cf_df.columns:
-                cat_summary = cf_df[cf_df['Kas Keluar'] > 0].groupby("Kategori Pengeluaran")['Kas Keluar'].sum().reset_index()
-                if not cat_summary.empty:
-                    fig_pie = px.pie(cat_summary, names="Kategori Pengeluaran", values="Kas Keluar", title="Distribusi Kategori Pengeluaran Kas", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                    fig_pie.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                else:
-                    st.info("Tidak ada data pengeluaran untuk dikategorikan.")
-
-        st.markdown("---")
-        st.subheader("🚨 Deteksi Anomali Pengeluaran Kas")
-        if not cf_anomalies.empty:
-            st.warning(f"Ditemukan **{len(cf_anomalies)} transaksi pengeluaran** yang nilainya jauh di atas rata-rata normal (potensi pemborosan atau lonjakan biaya tak terduga).")
-            st.dataframe(cf_anomalies[[col_date, col_desc, 'Kas Keluar', 'Kategori Pengeluaran']] if col_date and col_desc else cf_anomalies, use_container_width=True)
-        else:
-            st.success("Tidak ditemukan anomali pengeluaran kas ekstrem.")
-
-        with st.expander("👁️ Lihat Tabel Lengkap Mutasi & Saldo Berjalan (Running Balance)"):
-            st.dataframe(cf_df, use_container_width=True)
-
-    # ---------------- TAB 3: ANALISIS RASIO & KEUANGAN ----------------
-    with tab3:
-        st.subheader(f"Ikhtisar Pos Keuangan ({entity_type})")
-        if "Pemerintahan" in entity_type:
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: metric_card("Realisasi Pendapatan", format_rupiah(fin_values["real_pendapatan"]))
-            with c2: metric_card("Realisasi Belanja", format_rupiah(fin_values["real_belanja"]))
-            with c3: metric_card("Pendapatan Asli Daerah (PAD)", format_rupiah(fin_values["pad"]))
-            with c4: metric_card("Surplus / (Defisit)", format_rupiah(fin_values["surplus"]))
-        else:
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: metric_card("Total Pendapatan", format_rupiah(fin_values["pendapatan"]))
-            with c2: metric_card("Laba Bersih", format_rupiah(fin_values["laba"]))
-            with c3: metric_card("Total Aset", format_rupiah(fin_values["total_aset"]))
-            with c4: metric_card("Total Ekuitas", format_rupiah(fin_values["ekuitas"]))
-
-        st.markdown("---")
-        st.subheader("Hasil Perhitungan & Interpretasi Rasio")
-        r_cols = st.columns(len(rasio_hasil)) if rasio_hasil else []
-        for idx, (r_name, r_val) in enumerate(rasio_hasil.items()):
-            with r_cols[idx]:
-                metric_card(r_name, f"{r_val}")
-
-        if rasio_hasil:
-            fig_rasio = px.bar(
-                x=list(rasio_hasil.keys()),
-                y=list(rasio_hasil.values()),
-                labels={"x": "Indikator Rasio", "y": "Nilai"},
-                title="Visualisasi Rasio Keuangan",
-                color_discrete_sequence=["#FF5C8B"]
-            )
-            st.plotly_chart(fig_rasio, use_container_width=True)
-
-            for r_name, r_val in rasio_hasil.items():
-                insight_html = get_detailed_insight(r_name, r_val)
-                st.markdown(f"""
-                <div class="insight-box">
-                    <h4>📊 {r_name}: {r_val}</h4>
-                    <p>{insight_html}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-    # ---------------- TAB 4: ASISTEN AUDITOR AI & WHAT-IF ----------------
-    with tab4:
-        st.subheader("💬 Konsultasi AI & Simulasi What-If Arus Kas")
-        audit_summary_context = json.dumps({
-            "file": uploaded_file.name,
-            "entitas": entity_type,
-            "jumlah_baris": len(df),
-            "ringkasan_kas": cf_metrics,
-            "temuan_audit": all_findings,
-            "pos_keuangan": fin_values,
-            "rasio_keuangan": rasio_hasil
-        }, ensure_ascii=False, indent=2)
-
-        preset_q = st.selectbox("Pilih Pertanyaan / Simulasi Cepat:", [
-            "-- Ketik pertanyaan kustom --",
-            "Buatkan ringkasan eksekutif kesehatan keuangan dan likuiditas dari data arus kas ini.",
-            "Jika saya memotong biaya operasional sebesar 20%, berapa lama cash runway saya bertambah?",
-            "Anomali apa saja yang paling berisiko dalam data transaksi ini dan apa saran auditnya?"
-        ])
-
-        user_prompt = st.text_area("Instruksi / Pertanyaan Anda ke AI:", value="" if preset_q == "-- Ketik pertanyaan kustom --" else preset_q, height=100)
-
-        if st.button("🚀 Kirim ke FINORA AI"):
-            if user_prompt.strip():
-                with st.chat_message("assistant"):
-                    st.write_stream(ask_gemini_stream(user_prompt, audit_summary_context, system_role="AI Cash Flow Advisor & Senior Auditor"))
-            else:
-                st.warning("Silakan masukkan pertanyaan terlebih dahulu.")
-
-    # ---------------- TAB 5: SIMPAN & EKSPOR ----------------
-    with tab5:
-        st.subheader("💾 Simpan ke Database & Unduh Laporan PDF")
-        col_save, col_pdf = st.columns(2)
-
-        with col_save:
-            if st.button("Simpan Hasil Analisis ke Riwayat"):
-                summary_payload = {
-                    "fin_values": fin_values,
-                    "rasio": rasio_hasil,
-                    "cash_flow_metrics": cf_metrics,
-                    "total_findings": len(all_findings)
-                }
-                aid = save_analysis(file_id, audit_mode, selected_modules, summary_payload)
-                save_findings(aid, all_findings)
-                st.success(f"Analisis berhasil disimpan ke database dengan ID #{aid}!")
-
-        with col_pdf:
-            summary_for_pdf = fin_values if any(fin_values.values()) else {"Total Baris Diperiksa": len(df), "Total Temuan": len(all_findings)}
-            pdf_buffer = generate_pdf_report(uploaded_file.name, entity_type, summary_for_pdf, all_findings, rasio_hasil)
-            st.download_button(
-                label="📄 Unduh Laporan Audit & Kas (PDF)",
-                data=pdf_buffer,
-                file_name=f"Laporan_FINORA_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf"
-            )
+    col_cta1, col_cta2, col_cta3 = st.columns([1, 2, 1])
+    with col_cta2:
+        st.markdown("""<style>.stButton > button { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%) !important; color: white !important; font-size: 1.3rem !important; padding: 20px 30px !important; border-radius: 12px !important; border: none !important; font-weight: 800 !important; width: 100%; }</style>""", unsafe_allow_html=True)
+        if st.button("🚀 MULAI APLIKASI SEKARANG", use_container_width=True):
+            st.session_state.app_started = True
+            st.rerun()
 
 else:
-    st.info("👆 Silakan unggah file Excel (`.xlsx`, `.xls`) atau `.csv` pada panel di atas untuk memulai analisis audit dan Cash Flow Intelligence.")
+    # --- 2. SETELAH MASUK: SIDEBAR & FITUR UTAMA ---
+    st.markdown("""<style>[data-testid="collapsedControl"] { display: block; }</style>""", unsafe_allow_html=True)
+    
+    with st.sidebar:
+        st.header("🧭 Navigasi Menu")
+        menu = st.radio("Pilih Halaman:", [
+            "🏠 Dashboard Ringkasan", 
+            "🔎 Fitur 1: Audit Profesional", 
+            "📈 Fitur 2: Analisis Laporan Keuangan", 
+            "💵 Fitur 3: Cash Flow Intelligence",
+            "💾 Arsip & Riwayat Laporan"
+        ])
+        
+        st.markdown("---")
+        entity_type = st.selectbox("Jenis Entitas", ["Perusahaan / UMKM (Komersial)", "Instansi Pemerintahan / Sektor Publik"])
+        
+        if st.button("🚪 Kembali ke Halaman Utama"):
+            st.session_state.app_started = False
+            st.rerun()
+
+    # ---------------- 🏠 DASHBOARD ----------------
+    if menu == "🏠 Dashboard Ringkasan":
+        st.markdown("""
+        <div class="finora-header">
+            <h1>📊 Dashboard Utama FINORA AI</h1>
+            <p>Pusat kendali dan ringkasan aktivitas analisis data keuangan Anda.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        conn = get_conn()
+        t_files = pd.read_sql_query("SELECT COUNT(*) c FROM files", conn).iloc[0]['c']
+        t_analyses = pd.read_sql_query("SELECT COUNT(*) c FROM analyses", conn).iloc[0]['c']
+        t_findings = pd.read_sql_query("SELECT COUNT(*) c FROM findings", conn).iloc[0]['c']
+        conn.close()
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("📁 File Diproses", t_files)
+        c2.metric("📊 Analisis Selesai", t_analyses)
+        c3.metric("⚠️ Total Temuan Risiko", t_findings)
+
+        st.markdown("---")
+        st.subheader("💡 Panduan Penggunaan Sistem")
+        st.markdown("""
+        1. **Fitur 1 (Audit Profesional):** Unggah file transaksi Excel/CSV Anda untuk mendeteksi duplikasi, nilai negatif, transaksi akhir pekan, hingga anomali *outlier*.
+        2. **Fitur 2 (Analisis Keuangan):** Evaluasi rasio profitabilitas, likuiditas, solvabilitas, atau rasio fiskal daerah secara otomatis.
+        3. **Fitur 3 (Cash Flow Intelligence):** Pantau saldo berjalan (*running balance*), ketahanan kas (*cash runway*), hingga simulasi AI *What-If*.
+        """)
+
+    # ---------------- 🔎 FITUR 1: AUDIT ----------------
+    elif menu == "🔎 Fitur 1: Audit Profesional":
+        st.markdown("""
+        <div class="finora-header">
+            <h1>🔎 Fitur 1: Audit Profesional & Deteksi Anomali</h1>
+            <p>Unggah file transaksi dan jalankan uji kepatuhan otomatis.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        uploaded = st.file_uploader("📂 Unggah File Transaksi (Excel / CSV)", type=["xlsx", "csv"], key="audit_upload")
+        if uploaded:
+            df = pd.read_excel(uploaded) if uploaded.name.endswith('xlsx') else pd.read_csv(uploaded)
+            detected = auto_detect_columns(df)
+            
+            with st.expander("⚙️ Pengaturan & Pemetaan Kolom"):
+                c1, c2, c3 = st.columns(3)
+                date_col = c1.selectbox("Kolom Tanggal", [""] + list(df.columns), index=list(df.columns).index(detected["date"])+1 if detected["date"] else 0)
+                amount_col = c2.selectbox("Kolom Nominal", [""] + list(df.columns), index=list(df.columns).index(detected["amount"])+1 if detected["amount"] else 0)
+                desc_col = c3.selectbox("Kolom Deskripsi", [""] + list(df.columns), index=list(df.columns).index(detected["desc"])+1 if detected["desc"] else 0)
+
+            entitas = st.text_input("Nama Entitas / Perusahaan", "PT Maju Sejahtera")
+            
+            if st.button("🚀 Jalankan Prosedur Audit", use_container_width=True):
+                all_findings, flagged_data = [], {}
+                cols = [c for c in [date_col, amount_col, desc_col] if c]
+                f, flag = audit_empty(df, cols); all_findings.extend(f); flagged_data["Kelengkapan Kosong"] = flag
+                if amount_col:
+                    f, flag = audit_negative(df, amount_col); all_findings.extend(f); flagged_data["Nilai Negatif"] = flag
+                    f, flag = audit_outliers_iqr(df, amount_col); all_findings.extend(f); flagged_data["Outlier IQR"] = flag
+                
+                score = min(100, len(all_findings) * 15)
+                st.success(f"Audit Selesai! Ditemukan {len(all_findings)} potensi temuan.")
+                
+                st.markdown("### Ringkasan Temuan Audit")
+                for item in all_findings:
+                    st.warning(f"**[{item['risk_level']}] {item['module']}**: {item['title']} — *Rekomendasi:* {item['recommendation']}")
+
+    # ---------------- 📈 FITUR 2: ANALISIS KEUANGAN ----------------
+    elif menu == "📈 Fitur 2: Analisis Laporan Keuangan":
+        st.markdown("""
+        <div class="finora-header">
+            <h1>📈 Fitur 2: Analisis Laporan Keuangan & Rasio</h1>
+            <p>Ekstraksi otomatis laporan posisi keuangan dan perhitungan rasio penting.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        uploaded_fin = st.file_uploader("📂 Unggah Laporan Keuangan (Excel / CSV)", type=["xlsx", "csv"], key="fin_upload")
+        if uploaded_fin:
+            df_fin = pd.read_excel(uploaded_fin) if uploaded_fin.name.endswith('xlsx') else pd.read_csv(uploaded_fin)
+            if st.button("📊 Hitung Rasio & Analisis", use_container_width=True):
+                nilai_utama = auto_extract_financials(df_fin, entity_type)
+                rasio = hitung_rasio_dari_nilai(nilai_utama, entity_type)
+                
+                st.success("Analisis Keuangan Berhasil Dijalankan!")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("### Komponen Utama")
+                    for k, v in nilai_utama.items():
+                        if v > 0: st.metric(k.replace("_", " ").title(), format_rupiah(v))
+                with c2:
+                    st.markdown("### Rasio Keuangan")
+                    for k, v in rasio.items():
+                        st.metric(k, f"{v}")
+
+    # ---------------- 💵 FITUR 3: CASH FLOW INTELLIGENCE ----------------
+    elif menu == "💵 Fitur 3: Cash Flow Intelligence":
+        st.markdown("""
+        <div class="finora-header">
+            <h1>💵 Fitur 3: Cash Flow Intelligence (Arus Kas)</h1>
+            <p>Analisis likuiditas, saldo berjalan, burn rate, runway, dan Konsultasi AI.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        uploaded_cf = st.file_uploader("📂 Unggah Data Mutasi Kas / Buku Besar (Excel / CSV)", type=["xlsx", "csv"], key="cf_upload")
+        if uploaded_cf:
+            df_cf = pd.read_excel(uploaded_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf)
+            detected_cf = auto_detect_columns(df_cf)
+            
+            with st.expander("⚙️ Pemetaan Kolom Arus Kas"):
+                c1, c2, c3, c4 = st.columns(4)
+                cf_date = c1.selectbox("Kolom Tanggal", [""] + list(df_cf.columns), index=list(df_cf.columns).index(detected_cf["date"])+1 if detected_cf["date"] else 0)
+                cf_desc = c2.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(detected_cf["desc"])+1 if detected_cf["desc"] else 0)
+                cf_in = c3.selectbox("Kolom Kas Masuk", [""] + list(df_cf.columns), index=list(df_cf.columns).index(detected_cf["cash_in"] or detected_cf["amount"])+1 if (detected_cf["cash_in"] or detected_cf["amount"]) else 0)
+                cf_out = c4.selectbox("Kolom Kas Keluar", [""] + list(df_cf.columns), index=list(df_cf.columns).index(detected_cf["cash_out"])+1 if detected_cf["cash_out"] else 0)
+            
+            initial_balance = st.number_input("Saldo Awal Kas (Rp)", value=10_000_000.0, step=1_000_000.0)
+            
+            if st.button("🚀 Analisis Arus Kas & Likuiditas", use_container_width=True):
+                cf_df, cf_metrics, cf_anomalies = process_cash_flow_data(df_cf, cf_date, cf_desc, cf_in, cf_out, initial_balance)
+                
+                st.session_state['cf_results'] = {
+                    "df": cf_df, "metrics": cf_metrics, "anomalies": cf_anomalies, "filename": uploaded_cf.name
+                }
+                st.success("Analisis Arus Kas Berhasil!")
+
+        if 'cf_results' in st.session_state:
+            res = st.session_state['cf_results']
+            m = res["metrics"]
+            
+            st.markdown("---")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Saldo Kas Akhir", format_rupiah(m["saldo_akhir"]))
+            c2.metric("Total Kas Masuk", format_rupiah(m["total_masuk"]))
+            c3.metric("Total Kas Keluar", format_rupiah(m["total_keluar"]))
+            c4.metric("Cash Runway", f"{m['cash_runway_months']} Bulan")
+
+            tab_cf_grafik, tab_cf_ai = st.tabs(["📈 Grafik Tren & Anomali", "🤖 Tanya AI & Simulasi What-If"])
+            
+            with tab_cf_grafik:
+                if not res["df"].empty and 'Running Balance' in res["df"].columns:
+                    fig = px.line(res["df"], x=res["df"].columns[0], y="Running Balance", title="Tren Saldo Berjalan (Running Balance)", markers=True)
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                st.markdown("### Deteksi Anomali Pengeluaran Kas")
+                if not res["anomalies"].empty:
+                    st.warning(f"Ditemukan {len(res['anomalies']} transaksi pengeluaran di atas batas normal.")
+                    st.dataframe(res["anomalies"], use_container_width=True)
+                else:
+                    st.info("Tidak ada anomali pengeluaran ekstrem.")
+
+            with tab_cf_ai:
+                st.markdown("### 🤖 AI Cash Flow Advisor & Simulasi What-If")
+                if "cf_chat_history" not in st.session_state: st.session_state.cf_chat_history = []
+                
+                for msg in st.session_state.cf_chat_history:
+                    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+                
+                prompt_cf = st.text_input("Tanyakan kondisi kas atau simulasi (misal: 'Jika saya memotong biaya operasional 20%, berapa lama runway bertambah?')", key="cf_prompt_input")
+                if st.button("Kirim ke AI", key="btn_send_cf_ai"):
+                    if prompt_cf:
+                        st.session_state.cf_chat_history.append({"role": "user", "content": prompt_cf})
+                        context_cf_ai = f"Metrik Kas: Saldo Akhir Rp {m['saldo_akhir']:,.0f}, Burn Rate Rp {m['monthly_burn_rate']:,.0f}/bln, Runway {m['cash_runway_months']} bulan."
+                        with st.chat_message("assistant"):
+                            response_ai = st.write_stream(ask_gemini_stream(prompt_cf, context_cf_ai, system_role="AI Cash Flow Advisor & Senior Financial Expert"))
+                        st.session_state.cf_chat_history.append({"role": "assistant", "content": response_ai})
+                        st.rerun()
+
+    # ---------------- 💾 ARSIP ----------------
+    elif menu == "💾 Arsip & Riwayat Laporan":
+        st.markdown("""
+        <div class="finora-header">
+            <h1>💾 Arsip & Riwayat Laporan</h1>
+            <p>Daftar seluruh analisis yang pernah disimpan ke database lokal.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        df_hist = fetch_analyses()
+        if df_hist.empty:
+            st.info("Belum ada riwayat laporan tersimpan.")
+        else:
+            st.dataframe(df_hist, use_container_width=True)
