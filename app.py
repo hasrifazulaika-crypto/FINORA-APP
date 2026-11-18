@@ -260,7 +260,7 @@ def audit_outliers_iqr(df, amount_col):
     return findings, flagged
 
 # ============================================================
-# SMART FINANCIAL & CASH FLOW ENGINE
+# SMART FINANCIAL ENGINE
 # ============================================================
 def auto_extract_financials(df, entity_type):
     results = {"pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0, "total_aset": 0.0, "total_liabilitas": 0.0, "ekuitas": 0.0, "real_pendapatan": 0.0, "ang_pendapatan": 0.0, "real_belanja": 0.0, "ang_belanja": 0.0, "surplus": 0.0, "pad": 0.0}
@@ -360,4 +360,7 @@ def get_detailed_insight(ratio_name, val):
     elif "Kemandirian" in ratio_name:
         if val >= 50: return "<b>Kondisi:</b> Mandiri. PAD mendominasi struktur pendapatan.<br><b>Penyebab:</b> Basis pajak dan retribusi daerah yang kuat, serta iklim investasi yang sehat.<br><b>Dampak:</b> Tidak terlalu bergantung pada transfer pemerintah pusat. Fleksibilitas fiskal tinggi.<br><b>Rekomendasi:</b> Kembangkan BUMD dan investasi daerah untuk memperkuat struktur fiskal. Berikan insentif bagi investor yang masuk untuk menjaga keberlanjutan PAD."
         elif val >= 25: return "<b>Kondisi:</b> Sedang. Masih cukup bergantung pada dana transfer pusat.<br><b>Penyebab:</b> Sektor unggulan daerah belum tergarap maksimal atau kepatuhan pajak masih rendah.<br><b>Dampak:</b> Rentan terhadap perubahan kebijakan fiskal pusat.<br><b>Rekomendasi:</b> Gali potensi PAD baru (pariwisata, pajak reklame, parkir). Lakukan deregulasi perizinan untuk menarik investasi swasta yang bisa meningkatkan pajak daerah."
-        else: return "<b>Kondisi:</b> Rendah (Sangat Tergantung Transfer).<br><b>Penyebab:</b> Basis pajak/retribusi lokal yang kecil, atau kapasitas fiskal daerah yang terbatas.<br><
+        else: return "<b>Kondisi:</b> Rendah (Sangat Tergantung Transfer).<br><b>Penyebab:</b> Basis pajak/retribusi lokal yang kecil, atau kapasitas fiskal daerah yang terbatas.<br><b>Dampak:</b> Ketergantungan tinggi pada pusat (Dana Transfer). Jika transfer terlambat, pembangunan daerah ikut terhambat.<br><b>Rekomendasi:</b> Lakukan reformasi perpajakan daerah secara menyeluruh. Ciptakan iklim investasi yang ramah (kemudahan izin) untuk merangsang aktivitas ekonomi lokal, sehingga pajak daerah meningkat secara alami."
+            
+    elif "Current Ratio" in ratio_name:
+        if val >= 1.5: return "<b>Kondisi:</b> Likuiditas Sehat.<br><b>Penyebab:</b> Manajemen modal kerja yang baik, kas dan
