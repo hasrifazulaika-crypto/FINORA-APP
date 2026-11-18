@@ -101,6 +101,14 @@ def save_analysis(file_id, mode, selected_modules, summary):
     aid = c.lastrowid; conn.commit(); conn.close()
     return aid
 
+def save_findings(analysis_id, findings):
+    if not findings: return
+    conn = get_conn(); c = conn.cursor()
+    for f in findings:
+        c.execute("INSERT INTO findings(analysis_id, module, risk_level, title, detail, recommendation) VALUES (?,?,?,?,?,?)",
+                  (analysis_id, f["module"], f["risk_level"], f["title"], f["detail"], f["recommendation"]))
+    conn.commit(); conn.close()
+
 def fetch_analyses():
     conn = get_conn()
     df = pd.read_sql_query("SELECT a.id, f.filename, a.mode, a.created_at FROM analyses a JOIN files f ON a.file_id = f.id ORDER BY a.created_at DESC", conn)
@@ -110,6 +118,11 @@ def fetch_analysis_by_id(aid):
     conn = get_conn()
     df = pd.read_sql_query("""SELECT a.id, a.summary_json, f.filename FROM analyses a JOIN files f ON a.file_id = f.id WHERE a.id=?""", conn, params=(aid,))
     conn.close(); return df.iloc[0] if not df.empty else None
+
+def fetch_findings(aid):
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM findings WHERE analysis_id=?", conn, params=(aid,))
+    conn.close(); return df
 
 # ============================================================
 # AI ENGINE
@@ -432,13 +445,4 @@ def generate_fin_excel(nilai, rasio, entity_type):
         else:
             data_nilai = [{"Komponen": "Total Pendapatan", "Nilai": nilai.get("pendapatan", 0)}, {"Komponen": "Laba Bersih", "Nilai": nilai.get("laba", 0)}, {"Komponen": "Total Aset", "Nilai": nilai.get("total_aset", 0)}]
         pd.DataFrame(data_nilai).to_excel(writer, sheet_name="Data Keuangan", index=False)
-        pd.DataFrame([{"Rasio": k, "Nilai (%)": v} for k, v in rasio.items()]).to_excel(writer, sheet_name="Rasio Keuangan", index=False)
-    buffer.seek(0)
-    return buffer
-
-def generate_fin_pdf(nilai, rasio, entity_type):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    elements = []
-    styles = getSampleStyleSheet()
-   
+        pd.DataFrame([{"Rasio": k, "Nilai (%)": v} for k, v in rasio.items()]).to_excel(writer, sheet_name="Rasio Keuangan
