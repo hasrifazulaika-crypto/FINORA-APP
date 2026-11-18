@@ -153,7 +153,7 @@ def fetch_findings(aid):
     conn.close(); return df
 
 # ============================================================
-# AI ENGINE (FIXED MODEL VERSION)
+# AI ENGINE
 # ============================================================
 def get_gemini_client():
     try:
@@ -175,7 +175,6 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
             yield "⚠️ API Key Gemini belum diatur di Secrets Streamlit."
             return
 
-        # Menggunakan model stabil yang didukung penuh
         model_id = "gemini-2.5-flash"
 
         full_prompt = f"""
@@ -198,7 +197,7 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
         yield f"\n\n⚠️ Terjadi kesalahan koneksi AI: {str(e)}"
 
 # ============================================================
-# AUDIT ENGINE & CASH FLOW ENGINE
+# AUDIT & CASH FLOW ENGINE
 # ============================================================
 def auto_detect_columns(df):
     mapping = {"date": None, "amount": None, "desc": None, "debit": None, "credit": None, "budget": None, "invoice": None, "cash_in": None, "cash_out": None}
@@ -665,7 +664,9 @@ else:
                 
                 st.markdown("### Deteksi Anomali Pengeluaran Kas")
                 if not res["anomalies"].empty:
-                    st.warning(f"Ditemukan {len(res['anomalies']} transaksi pengeluaran di atas batas normal.")
+                    # Diperbaiki bagian kurung kur siku f-string agar tidak erosi SyntaxError
+                    anomaly_count = len(res['anomalies'])
+                    st.warning(f"Ditemukan {anomaly_count} transaksi pengeluaran di atas batas normal.")
                     st.dataframe(res["anomalies"], use_container_width=True)
                 else:
                     st.info("Tidak ada anomali pengeluaran ekstrem.")
