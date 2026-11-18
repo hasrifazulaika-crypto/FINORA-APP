@@ -256,7 +256,6 @@ def audit_outliers_iqr(df, amount_col):
 # ============================================================
 def auto_extract_financials(df, entity_type):
     results = {"pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0, "total_aset": 0.0, "total_liabilitas": 0.0, "ekuitas": 0.0, "real_pendapatan": 0.0, "ang_pendapatan": 0.0, "real_belanja": 0.0, "ang_belanja": 0.0, "surplus": 0.0, "pad": 0.0}
-    
     str_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
     num_cols = df.select_dtypes(include=['number', 'float', 'int']).columns.tolist()
     if not str_cols or not num_cols: return results
@@ -335,7 +334,6 @@ def get_detailed_insight(ratio_name, val):
 # --- FITUR BARU: CASHFLOW ENGINE ---
 def auto_extract_cashflow(df):
     results = {"operasi": 0.0, "investasi": 0.0, "pendanaan": 0.0, "net_cash": 0.0, "kas_awal": 0.0, "kas_akhir": 0.0}
-    
     str_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
     num_cols = df.select_dtypes(include=['number', 'float', 'int']).columns.tolist()
     if not str_cols or not num_cols: return results
@@ -343,7 +341,6 @@ def auto_extract_cashflow(df):
     val_col = num_cols[0]
 
     clean_names = df[name_col].astype(str).str.lower().str.replace(r'[^a-z\s]', '', regex=True).str.strip()
-
     def get_total(contains_keys):
         mask = clean_names.str.contains('|'.join(contains_keys), na=False)
         if mask.any():
@@ -359,7 +356,6 @@ def auto_extract_cashflow(df):
 
     if results["net_cash"] == 0:
         results["net_cash"] = results["operasi"] + results["investasi"] + results["pendanaan"]
-
     return results
 
 # ============================================================
@@ -390,14 +386,7 @@ def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data)
     elements.append(Paragraph("KERTAS KERJA AUDIT (KKA)", title_style))
     elements.append(Paragraph("FINORA Financial Intelligence System", normal_style))
     elements.append(Spacer(1, 10))
-
-    header_data = [
-        ["Nama Entitas", f": {entitas if entitas else '-'}"],
-        ["Periode Audit", f": {periode if periode else '-'}"],
-        ["Nama File", f": {filename}"],
-        ["Tanggal Pemeriksaan", f": {datetime.now().strftime('%d %B %Y')}"],
-        ["Skor Risiko", f": {score}/100"]
-    ]
+    header_data = [["Nama Entitas", f": {entitas if entitas else '-'}"],["Periode Audit", f": {periode if periode else '-'}"],["Nama File", f": {filename}"],["Tanggal Pemeriksaan", f": {datetime.now().strftime('%d %B %Y')}"],["Skor Risiko", f": {score}/100"]]
     t_header = Table(header_data, colWidths=[120, 350])
     t_header.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), 'Helvetica'), ('FONTSIZE', (0, 0), (-1, -1), 10), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
     elements.append(t_header)
@@ -445,4 +434,10 @@ def generate_fin_excel(nilai, rasio, entity_type):
         else:
             data_nilai = [{"Komponen": "Total Pendapatan", "Nilai": nilai.get("pendapatan", 0)}, {"Komponen": "Laba Bersih", "Nilai": nilai.get("laba", 0)}, {"Komponen": "Total Aset", "Nilai": nilai.get("total_aset", 0)}]
         pd.DataFrame(data_nilai).to_excel(writer, sheet_name="Data Keuangan", index=False)
-        pd.DataFrame([{"Rasio": k, "Nilai (%)": v} for k, v in rasio.items()]).to_excel(writer, sheet_name="Rasio Keuangan
+        pd.DataFrame([{"Rasio": k, "Nilai (%)": v} for k, v in rasio.items()]).to_excel(writer, sheet_name="Rasio Keuangan", index=False)
+    buffer.seek(0)
+    return buffer
+
+def generate_fin_pdf(nilai, rasio, entity_type):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=
