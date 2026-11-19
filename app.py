@@ -7,6 +7,7 @@ import os
 import io
 import base64
 import hashlib
+import re
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
@@ -201,6 +202,53 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
 
     except Exception as e:
         yield f"\n\n⚠️ Terjadi kesalahan: {str(e)}"
+
+# ============================================================
+# PDF / FILE LOADER
+# ============================================================
+def read_uploaded_dataframe(uploaded_file, header_row=0):
+    name = uploaded_file.name.lower()
+    if name.endswith(".xlsx"):
+        return pd.read_excel(uploaded_file, header=header_row)
+    elif name.endswith(".csv"):
+        return pd.read_csv(uploaded_file, header=header_row)
+    elif name.endswith(".pdf"):
+        raw_bytes = uploaded_file.getvalue()
+        text_lines = []
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+            for page in reader.pages:
+                t = page.extract_text() or ""
+                for line in t.splitlines():
+                    if line.strip():
+                        text_lines.append(line.strip())
+        except Exception:
+            pass
+        if not text_lines:
+            try:
+                decoded = raw_bytes.decode("latin-1", errors="ignore")
+                for part in decoded.split("BT"):
+                    clean_part = "".join(ch if 32 <= ord(ch) <= 126 else " " for ch in part).strip()
+                    if len(clean_part) > 3:
+                        text_lines.append(clean_part)
+            except Exception:
+                pass
+        rows = []
+        for line in text_lines:
+            nums = re.findall(r'-?\d[\d.,]*', line)
+            nominal = 0.0
+            if nums:
+                raw_num = nums[-1].replace(".", "").replace(",", ".")
+                try:
+                    nominal = float(raw_num)
+                except ValueError:
+                    nominal = 0.0
+            rows.append({"Uraian": line, "Nominal": nominal})
+        if not rows:
+            rows = [{"Uraian": "PDF kosong / tidak terbaca", "Nominal": 0.0}]
+        return pd.DataFrame(rows)
+    return pd.read_csv(uploaded_file, header=header_row)
 
 # ============================================================
 # AUDIT ENGINE V5 (FITUR LAMA - AMAN)
@@ -655,11 +703,11 @@ def page_audit():
     finora_header("Audit Profesional", "Sistem deteksi otomatis anomali transaksi")
     st.markdown("### 1. Upload Data Audit")
     c1, c2 = st.columns([3, 1])
-    uploaded = c1.file_uploader("Upload File Excel/CSV", type=["xlsx", "csv"], key="audit_upload_unique")
+    uploaded = c1.file_uploader("Upload File Excel/CSV/PDF", type=["xlsx", "csv", "pdf"], key="audit_upload_unique")
     header_row = c2.number_input("Header di baris ke-", min_value=0, value=0, key="audit_header_unique")
 
     if uploaded:
-        df = pd.read_excel(uploaded, header=header_row) if uploaded.name.endswith('xlsx') else pd.read_csv(uploaded, header=header_row)
+        df = read_uploaded_dataframe(uploaded, header_row=header_row)
         detected = auto_detect_columns(df)
         
         st.markdown("### 2. Pemetaan Kolom")
@@ -718,11 +766,11 @@ def page_financial_analysis():
     finora_header("Analisis Laporan Keuangan", "Evaluasi Kesehatan Finansial Otomatis")
     st.markdown("### 1. Upload Laporan Keuangan")
     c1, c2 = st.columns([2, 1])
-    uploaded_fin = c1.file_uploader("Upload File Excel/CSV (APBD / Neraca / Laba Rugi)", type=["xlsx", "csv"], key="fin_upload_unique")
+    uploaded_fin = c1.file_uploader("Upload File Excel/CSV/PDF (APBD / Neraca / Laba Rugi)", type=["xlsx", "csv", "pdf"], key="fin_upload_unique")
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"], key="fin_entity_unique")
 
     if uploaded_fin:
-        df_fin = pd.read_excel(uploaded_fin) if uploaded_fin.name.endswith('xlsx') else pd.read_csv(uploaded_fin)
+        df_fin = read_uploaded_dataframe(uploaded_fin, header_row=0)
         st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis keuangan otomatis.")
         
         if st.button("📊 ANALISIS KEUANGAN OTOMATIS", use_container_width=True):
