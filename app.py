@@ -7,7 +7,6 @@ import os
 import io
 import base64
 import hashlib
-import re
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
@@ -203,9 +202,7 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
     except Exception as e:
         yield f"\n\n⚠️ Terjadi kesalahan: {str(e)}"
 
-# ============================================================
-# PDF / FILE LOADER
-# ============================================================
+
 def read_uploaded_dataframe(uploaded_file, header_row=0):
     name = uploaded_file.name.lower()
     if name.endswith(".xlsx"):
@@ -227,6 +224,7 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
             pass
         if not text_lines:
             try:
+                from reportlab.pdfbase import pdfmetrics
                 decoded = raw_bytes.decode("latin-1", errors="ignore")
                 for part in decoded.split("BT"):
                     clean_part = "".join(ch if 32 <= ord(ch) <= 126 else " " for ch in part).strip()
@@ -235,6 +233,7 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
             except Exception:
                 pass
         rows = []
+        import re
         for line in text_lines:
             nums = re.findall(r'-?\d[\d.,]*', line)
             nominal = 0.0
@@ -795,7 +794,27 @@ def page_financial_analysis():
         for k, v in rasio.items():
             st.markdown(f'<div class="insight-box"><h4>{k}: {v}</h4><p>{get_detailed_insight(k, v)}</p></div>', unsafe_allow_html=True)
 
-        st.markdown("### 💵 Analisis Cash Flow")
+
+def page_cash_flow():
+    finora_header("Analisis Cash Flow", "Evaluasi Arus Kas Operasi, Investasi, dan Pendanaan")
+    st.markdown("### 1. Upload Laporan Keuangan / Arus Kas")
+    c1, c2 = st.columns([2, 1])
+    uploaded_cf = c1.file_uploader("Upload File Excel/CSV/PDF", type=["xlsx", "csv", "pdf"], key="cf_menu_upload")
+    entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"], key="cf_menu_entity")
+
+    if uploaded_cf:
+        df_cf = read_uploaded_dataframe(uploaded_cf, header_row=0)
+        st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis cash flow otomatis.")
+        if st.button("💵 ANALISIS CASH FLOW OTOMATIS", use_container_width=True):
+            with st.spinner("Menghitung arus kas..."):
+                nilai = auto_extract_financials(df_cf, entity_type)
+                st.session_state["cf_menu_results"] = {"nilai": nilai, "entity_type": entity_type, "filename": uploaded_cf.name}
+
+    if "cf_menu_results" in st.session_state:
+        res_cf = st.session_state["cf_menu_results"]
+        nilai = res_cf["nilai"]
+        st.markdown("---")
+        st.markdown(f"### Hasil Analisis Cash Flow: **{res_cf['entity_type']}**")
         cf_c1, cf_c2, cf_c3 = st.columns(3)
         with cf_c1:
             metric_card("Arus Kas Operasi", format_rupiah(nilai.get("arus_kas_operasi", 0)))
@@ -885,7 +904,7 @@ def main():
     else:
         menu = st.sidebar.selectbox(
             "Pilih Menu Utama", 
-            ["Dashboard", "Audit Profesional", "Analisis Laporan Keuangan", "Pusat Laporan & Arsip", "Kembali ke Beranda"]
+            ["Dashboard", "Audit Profesional", "Analisis Laporan Keuangan", "Analisis Cash Flow", "Pusat Laporan & Arsip", "Kembali ke Beranda"]
         )
         
         if menu == "Dashboard":
@@ -894,6 +913,8 @@ def main():
             page_audit()
         elif menu == "Analisis Laporan Keuangan":
             page_financial_analysis()
+        elif menu == "Analisis Cash Flow":
+            page_cash_flow()
         elif menu == "Pusat Laporan & Arsip":
             page_simpan()
         elif menu == "Kembali ke Beranda":
