@@ -171,7 +171,7 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
             yield "⚠️ API Key Gemini belum diatur di Secrets."
             return
 
-        model_id = "gemini-2.5-flash"
+        model_id = "gemini-3.8-flash"
 
         full_prompt = f"""
         Kamu adalah FINORA AI, {system_role}.
@@ -297,7 +297,7 @@ def audit_outliers_iqr(df, amount_col):
     return findings, flagged
 
 # ============================================================
-# SMART FINANCIAL & CASH FLOW ENGINE
+# SMART FINANCIAL ENGINE (+ CASH FLOW)
 # ============================================================
 def auto_extract_financials(df, entity_type):
     results = {
@@ -306,9 +306,8 @@ def auto_extract_financials(df, entity_type):
         "real_pendapatan": 0.0, "ang_pendapatan": 0.0,
         "real_belanja": 0.0, "ang_belanja": 0.0,
         "surplus": 0.0, "pad": 0.0,
-        # Cash Flow Components
-        "cf_operasi": 0.0, "cf_investasi": 0.0, "cf_pendanaan": 0.0,
-        "net_cash_flow": 0.0, "ending_cash": 0.0
+        "arus_kas_operasi": 0.0, "arus_kas_investasi": 0.0, "arus_kas_pendanaan": 0.0,
+        "arus_kas_bersih": 0.0, "saldo_kas_akhir": 0.0
     }
     
     str_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
@@ -341,9 +340,10 @@ def auto_extract_financials(df, entity_type):
                 return pd.to_numeric(df.loc[mask_contains, target_col], errors='coerce').fillna(0).sum()
         return 0.0
 
-    cf_op_explicit = get_total(real_col, [], ['arus kas operasi', 'aktivitas operasi', 'operating cash flow'])
-    cf_inv_explicit = get_total(real_col, [], ['arus kas investasi', 'aktivitas investasi', 'investing cash flow'])
-    cf_fin_explicit = get_total(real_col, [], ['arus kas pendanaan', 'aktivitas pendanaan', 'financing cash flow'])
+    ak_op = get_total(real_col, [], ['arus kas operasi', 'aktivitas operasi', 'kas dari operasi'])
+    ak_inv = get_total(real_col, [], ['arus kas investasi', 'aktivitas investasi', 'kas dari investasi'])
+    ak_fin = get_total(real_col, [], ['arus kas pendanaan', 'aktivitas pendanaan', 'kas dari pendanaan'])
+    kas_akhir = get_total(real_col, [], ['saldo kas akhir', 'kas akhir periode', 'kas dan setara kas akhir'])
 
     if "Pemerintahan" in entity_type:
         real_p = get_total(real_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
@@ -361,42 +361,55 @@ def auto_extract_financials(df, entity_type):
         surplus = get_total(real_col, [], ['surplus', 'defisit'])
         if surplus == 0: surplus = real_p - real_b
 
-        cf_op = cf_op_explicit if cf_op_explicit != 0 else (real_p - real_b * 0.8)
-        cf_inv = cf_inv_explicit if cf_inv_explicit != 0 else -(real_b * 0.2)
-        cf_fin = cf_fin_explicit if cf_fin_explicit != 0 else get_total(real_col, [], ['pembiayaan netto', 'penerimaan pembiayaan', 'pengeluaran pembiayaan'])
-        net_cf = cf_op + cf_inv + cf_fin
-        if net_cf == 0: net_cf = surplus
-        ending_cash = surplus * 1.2 if surplus != 0 else real_p * 0.15
+        if ak_op == 0 and (real_p != 0 or real_b != 0):
+            ak_op = real_p - (real_b * 0.8)
+        if ak_inv == 0 and real_b != 0:
+            ak_inv = -(real_b * 0.2)
+        if ak_fin == 0:
+            ak_fin = get_total(real_col, [], ['pembiayaan netto', 'penerimaan pembiayaan', 'pengeluaran pembiayaan'])
+        ak_bersih = ak_op + ak_inv + ak_fin
+        if kas_akhir == 0:
+            kas_akhir = ak_bersih
 
         results.update({
             "real_pendapatan": real_p, "ang_pendapatan": ang_p,
             "real_belanja": real_b, "ang_belanja": ang_b,
             "pad": pad, "surplus": surplus,
-            "cf_operasi": cf_op, "cf_investasi": cf_inv, "cf_pendanaan": cf_fin,
-            "net_cash_flow": net_cf, "ending_cash": ending_cash
+            "arus_kas_operasi": ak_op, "arus_kas_investasi": ak_inv, "arus_kas_pendanaan": ak_fin,
+            "arus_kas_bersih": ak_bersih, "saldo_kas_akhir": kas_akhir
         })
 
     else:
         rev = get_total(real_col, ['total pendapatan', 'pendapatan', 'total penjualan', 'penjualan'], ['pendapatan', 'penjualan', 'revenue'])
-        net_inc = get_total(real_col, ['laba bersih', 'laba tahun berjalan'], ['laba bersih', 'net income'])
-        tot_ast = get_total(real_col, ['total aset', 'jumlah aset'], ['total aset', 'total asset'])
+        laba = get_total(real_col, ['laba bersih', 'laba tahun berjalan'], ['laba bersih', 'net income'])
+        tot_aset = get_total(real_col, ['total aset', 'jumlah aset'], ['total aset', 'total asset'])
         eq = get_total(real_col, ['total ekuitas', 'total modal'], ['total ekuitas', 'total equity'])
         tot_liab = get_total(real_col, ['total liabilitas', 'total utang'], ['total liabilitas', 'total utang'])
-        ast_lancar = get_total(real_col, ['total aset lancar'], ['aset lancar', 'current asset'])
+        aset_lancar = get_total(real_col, ['total aset lancar'], ['aset lancar', 'current asset'])
         liab_lancar = get_total(real_col, ['total liabilitas jangka pendek', 'total utang lancar'], ['liabilitas jangka pendek', 'utang lancar', 'current liab'])
 
-        cf_op = cf_op_explicit if cf_op_explicit != 0 else (net_inc * 1.15 if net_inc != 0 else rev * 0.12)
-        cf_inv = cf_inv_explicit if cf_inv_explicit != 0 else -(tot_ast * 0.08)
-        cf_fin = cf_fin_explicit if cf_fin_explicit != 0 else (tot_liab * 0.05)
-        net_cf = cf_op + cf_inv + cf_fin
-        ending_cash = ast_lancar * 0.4 if ast_lancar != 0 else rev * 0.15
+        if ak_op == 0 and (laba != 0 or rev != 0):
+            ak_op = laba * 1.15 if laba != 0 else rev * 0.12
+        if ak_inv == 0 and tot_aset != 0:
+            ak_inv = -(tot_aset * 0.08)
+        if ak_fin == 0 and tot_liab != 0:
+            ak_fin = tot_liab * 0.05
+        ak_bersih = ak_op + ak_inv + ak_fin
+        if kas_akhir == 0:
+            kas_akhir = ak_bersih
 
-        results.update({
-            "pendapatan": rev, "laba": net_inc, "aset_lancar": ast_lancar, "liabilitas_lancar": liab_lancar,
-            "total_aset": tot_ast, "total_liabilitas": tot_liab, "ekuitas": eq,
-            "cf_operasi": cf_op, "cf_investasi": cf_inv, "cf_pendanaan": cf_fin,
-            "net_cash_flow": net_cf, "ending_cash": ending_cash
-        })
+        results["pendapatan"] = rev
+        results["laba"] = laba
+        results["total_aset"] = tot_aset
+        results["ekuitas"] = eq
+        results["total_liabilitas"] = tot_liab
+        results["aset_lancar"] = aset_lancar
+        results["liabilitas_lancar"] = liab_lancar
+        results["arus_kas_operasi"] = ak_op
+        results["arus_kas_investasi"] = ak_inv
+        results["arus_kas_pendanaan"] = ak_fin
+        results["arus_kas_bersih"] = ak_bersih
+        results["saldo_kas_akhir"] = kas_akhir
 
     return results
 
@@ -431,6 +444,7 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
 
 def get_detailed_insight(ratio_name, val):
     """Memberikan penjelasan panjang dengan format HTML (tanpa bintang) dan menangani nilai 0."""
+    
     if val == 0 or pd.isna(val):
         if "Pertumbuhan" in ratio_name:
             return "<b>Kondisi:</b> 0% (Tidak Ada Data Pertumbuhan / Stagnan).<br><b>Penyebab:</b> Sistem saat ini hanya memproses data 1 periode (tahun berjalan). Untuk menghitung pertumbuhan (YoY), dibutuhkan data Realisasi Pendapatan Tahun Sebelumnya.<br><b>Dampak:</b> Tidak dapat melihat tren naik/turunnya pendapatan dari tahun ke tahun.<br><b>Rekomendasi:</b> Simpan laporan tahun ini, lalu bandingkan dengan laporan tahun depan. Atau, upload file Excel yang memiliki kolom 'Realisasi Tahun Lalu' agar sistem dapat menghitung rasio pertumbuhan secara otomatis."
@@ -485,8 +499,21 @@ def get_detailed_insight(ratio_name, val):
             
     return "<b>Analisis:</b> Detail belum tersedia untuk kondisi ini."
 
+def get_cashflow_insight(nilai):
+    op = nilai.get("arus_kas_operasi", 0)
+    inv = nilai.get("arus_kas_investasi", 0)
+    fin = nilai.get("arus_kas_pendanaan", 0)
+    bersih = nilai.get("arus_kas_bersih", 0)
+    status = "Positif / Sehat" if op > 0 and bersih >= 0 else ("Perlu Perhatian" if op >= 0 else "Defisit Arus Kas Operasi")
+    return (
+        f"<b>Status Cash Flow:</b> {status}.<br>"
+        f"<b>Arus Kas Operasi:</b> {format_rupiah(op)} | <b>Investasi:</b> {format_rupiah(inv)} | <b>Pendanaan:</b> {format_rupiah(fin)}.<br>"
+        f"<b>Arus Kas Bersih (Net Cash Flow):</b> {format_rupiah(bersih)} | <b>Saldo Kas Akhir:</b> {format_rupiah(nilai.get('saldo_kas_akhir', 0))}.<br>"
+        f"<b>Rekomendasi:</b> Pastikan arus kas operasional tetap positif untuk menopang kebutuhan operasional dan investasi berkelanjutan tanpa ketergantungan berlebih pada pendanaan."
+    )
+
 # ============================================================
-# EXPORT FUNCTIONS (AUDIT & FINANCIAL)
+# EXPORT FUNCTIONS (AUDIT)
 # ============================================================
 def generate_excel(flagged_data_dict, findings_list):
     buffer = io.BytesIO()
@@ -541,60 +568,6 @@ def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data)
     ]))
     elements.append(t_summary)
     elements.append(Spacer(1, 20))
-
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-def generate_fin_excel(nilai, rasio, entity_type):
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        pd.DataFrame(list(nilai.items()), columns=["Komponen", "Nilai"]).to_excel(writer, sheet_name="Data Keuangan & Cash Flow", index=False)
-        pd.DataFrame(list(rasio.items()), columns=["Rasio", "Nilai"]).to_excel(writer, sheet_name="Rasio Keuangan", index=False)
-    buffer.seek(0)
-    return buffer
-
-def generate_fin_pdf(nilai, rasio, entity_type):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    elements = []
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(name='Title', parent=styles['Heading1'], textColor=colors.HexColor('#7A1F3D'), alignment=1)
-    heading_style = ParagraphStyle(name='Heading', parent=styles['Heading2'], textColor=colors.HexColor('#FF5C8B'))
-    normal_style = styles['Normal']
-
-    elements.append(Paragraph("LAPORAN ANALISIS KEUANGAN & CASH FLOW", title_style))
-    elements.append(Paragraph(f"FINORA Financial Intelligence System - {entity_type}", normal_style))
-    elements.append(Spacer(1, 10))
-
-    header_data = [
-        ["Jenis Entitas", f": {entity_type}"],
-        ["Tanggal Analisis", f": {datetime.now().strftime('%d %B %Y')}"]
-    ]
-    t_header = Table(header_data, colWidths=[120, 350])
-    t_header.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), 'Helvetica'), ('FONTSIZE', (0, 0), (-1, -1), 10)]))
-    elements.append(t_header)
-    elements.append(Spacer(1, 20))
-
-    elements.append(Paragraph("Ringkasan Cash Flow", heading_style))
-    elements.append(Spacer(1, 10))
-    cf_rows = [
-        ["Komponen Cash Flow", "Nilai"],
-        ["Arus Kas Operasi", format_rupiah(nilai.get("cf_operasi", 0))],
-        ["Arus Kas Investasi", format_rupiah(nilai.get("cf_investasi", 0))],
-        ["Arus Kas Pendanaan", format_rupiah(nilai.get("cf_pendanaan", 0))],
-        ["Net Cash Flow", format_rupiah(nilai.get("net_cash_flow", 0))],
-        ["Estimasi Kas Akhir Periode", format_rupiah(nilai.get("ending_cash", 0))],
-    ]
-    t_cf = Table(cf_rows, colWidths=[250, 220])
-    t_cf.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF5C8B')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
-    ]))
-    elements.append(t_cf)
-    elements.append(Spacer(1, 15))
 
     doc.build(elements)
     buffer.seek(0)
@@ -742,18 +715,18 @@ def page_audit():
         render_audit_results(res["findings"], res["flagged"], res["filename"], res["entitas"], res["periode"], res["score"])
 
 def page_financial_analysis():
-    finora_header("Analisis Laporan Keuangan & Cash Flow", "Evaluasi Kesehatan Finansial & Arus Kas Otomatis")
+    finora_header("Analisis Laporan Keuangan", "Evaluasi Kesehatan Finansial Otomatis")
     st.markdown("### 1. Upload Laporan Keuangan")
     c1, c2 = st.columns([2, 1])
-    uploaded_fin = c1.file_uploader("Upload File Excel/CSV (APBD / Neraca / Laba Rugi / Cash Flow)", type=["xlsx", "csv"], key="fin_upload_unique")
+    uploaded_fin = c1.file_uploader("Upload File Excel/CSV (APBD / Neraca / Laba Rugi)", type=["xlsx", "csv"], key="fin_upload_unique")
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"], key="fin_entity_unique")
 
     if uploaded_fin:
         df_fin = pd.read_excel(uploaded_fin) if uploaded_fin.name.endswith('xlsx') else pd.read_csv(uploaded_fin)
-        st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis keuangan dan cash flow otomatis.")
+        st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis keuangan otomatis.")
         
-        if st.button("📊 ANALISIS KEUANGAN & CASH FLOW OTOMATIS", use_container_width=True):
-            with st.spinner("Menghitung rasio dan arus kas..."):
+        if st.button("📊 ANALISIS KEUANGAN OTOMATIS", use_container_width=True):
+            with st.spinner("Menghitung rasio..."):
                 nilai_utama = auto_extract_financials(df_fin, entity_type)
                 rasio = hitung_rasio_dari_nilai(nilai_utama, entity_type)
                 st.session_state['fin_results'] = {
@@ -764,59 +737,32 @@ def page_financial_analysis():
         res = st.session_state['fin_results']
         rasio, nilai = res["rasio"], res["nilai"]
         st.markdown("---")
-        tab_rasio, tab_cashflow, tab_ai = st.tabs(["📊 Ringkasan & Rasio", "💵 Cash Flow Statement", "🧠 AI Financial & Cash Flow Advisor"])
+        st.markdown(f"### Hasil Analisis: **{res['entity_type']}**")
+        cols = st.columns(len(rasio) if len(rasio) > 0 else 1)
+        for i, (k, v) in enumerate(rasio.items()):
+            with cols[i % len(cols)]:
+                metric_card(k, f"{v}")
         
-        with tab_rasio:
-            st.markdown(f"### Hasil Analisis: **{res['entity_type']}**")
-            cols = st.columns(len(rasio) if len(rasio) > 0 else 1)
-            for i, (k, v) in enumerate(rasio.items()):
-                with cols[i % len(cols)]:
-                    metric_card(k, f"{v}")
-            
-            st.markdown("### 💡 Insight & Rekomendasi Rasio")
-            for k, v in rasio.items():
-                st.markdown(f'<div class="insight-box"><h4>{k}: {v}</h4><p>{get_detailed_insight(k, v)}</p></div>', unsafe_allow_html=True)
+        st.markdown("### 💡 Insight & Rekomendasi Rasio")
+        for k, v in rasio.items():
+            st.markdown(f'<div class="insight-box"><h4>{k}: {v}</h4><p>{get_detailed_insight(k, v)}</p></div>', unsafe_allow_html=True)
 
-            st.markdown("---")
-            col_dl1, col_dl2 = st.columns(2)
-            col_dl1.download_button("⬇️ Download Excel (Financial & Cash Flow)", data=generate_fin_excel(nilai, rasio, res['entity_type']), file_name=f"Analisis_Keuangan_CashFlow_{res['entity_type']}.xlsx", use_container_width=True)
-            col_dl2.download_button("⬇️ Download PDF Laporan", data=generate_fin_pdf(nilai, rasio, res['entity_type']), file_name=f"Analisis_Keuangan_CashFlow_{res['entity_type']}.pdf", use_container_width=True)
+        st.markdown("### 💵 Analisis Cash Flow")
+        cf_c1, cf_c2, cf_c3 = st.columns(3)
+        with cf_c1:
+            metric_card("Arus Kas Operasi", format_rupiah(nilai.get("arus_kas_operasi", 0)))
+        with cf_c2:
+            metric_card("Arus Kas Investasi", format_rupiah(nilai.get("arus_kas_investasi", 0)))
+        with cf_c3:
+            metric_card("Arus Kas Pendanaan", format_rupiah(nilai.get("arus_kas_pendanaan", 0)))
 
-        with tab_cashflow:
-            st.markdown("### 💵 Laporan Arus Kas (Cash Flow Statement)")
-            st.info("Rincian komponen Cash Flow (Operasi, Investasi, Pendanaan, Net Cash Flow, dan Estimasi Kas Akhir Periode):")
+        cf_c4, cf_c5 = st.columns(2)
+        with cf_c4:
+            metric_card("Net Cash Flow", format_rupiah(nilai.get("arus_kas_bersih", 0)))
+        with cf_c5:
+            metric_card("Saldo Kas Akhir", format_rupiah(nilai.get("saldo_kas_akhir", 0)))
 
-            cf_col1, cf_col2, cf_col3 = st.columns(3)
-            with cf_col1:
-                metric_card("Arus Kas Operasi", format_rupiah(nilai.get("cf_operasi", 0)), "Kas bersih dari aktivitas operasional")
-            with cf_col2:
-                metric_card("Arus Kas Investasi", format_rupiah(nilai.get("cf_investasi", 0)), "Kas bersih dari aktivitas investasi")
-            with cf_col3:
-                metric_card("Arus Kas Pendanaan", format_rupiah(nilai.get("cf_pendanaan", 0)), "Kas bersih dari aktivitas pendanaan")
-
-            st.markdown("---")
-            cf_col4, cf_col5 = st.columns(2)
-            with cf_col4:
-                metric_card("Net Cash Flow", format_rupiah(nilai.get("net_cash_flow", 0)), "Perubahan kas bersih periode ini")
-            with cf_col5:
-                metric_card("Estimasi Kas Akhir Periode", format_rupiah(nilai.get("ending_cash", 0)), "Saldo kas akhir periode")
-
-            st.markdown("#### 📋 Tabel Komponen Cash Flow")
-            df_cf_summary = pd.DataFrame([
-                {"Komponen Arus Kas": "1. Arus Kas dari Aktivitas Operasi", "Nilai": format_rupiah(nilai.get("cf_operasi", 0))},
-                {"Komponen Arus Kas": "2. Arus Kas dari Aktivitas Investasi", "Nilai": format_rupiah(nilai.get("cf_investasi", 0))},
-                {"Komponen Arus Kas": "3. Arus Kas dari Aktivitas Pendanaan", "Nilai": format_rupiah(nilai.get("cf_pendanaan", 0))},
-                {"Komponen Arus Kas": "4. Net Cash Flow (Perubahan Kas Bersih)", "Nilai": format_rupiah(nilai.get("net_cash_flow", 0))},
-                {"Komponen Arus Kas": "5. Estimasi Kas Akhir Periode", "Nilai": format_rupiah(nilai.get("ending_cash", 0))},
-            ])
-            st.table(df_cf_summary)
-
-        with tab_ai:
-            st.markdown("### 🤖 AI Financial & Cash Flow Advisor")
-            context_ai = f"Entitas: {res['entity_type']} | Rasio: {rasio} | Cash Flow Operasi: {format_rupiah(nilai.get('cf_operasi', 0))} | Net Cash Flow: {format_rupiah(nilai.get('net_cash_flow', 0))}"
-            if st.button("Buat Analisis Cash Flow & Kesehatan Finansial", use_container_width=True):
-                with st.chat_message("assistant"):
-                    st.write_stream(ask_gemini_stream("Berikan analisis mendalam mengenai kesehatan arus kas (cash flow) dan rekomendasi likuiditas.", context_ai, system_role="Konsultan Arus Kas & Keuangan Senior"))
+        st.markdown(f'<div class="insight-box"><h4>Analisis Cash Flow</h4><p>{get_cashflow_insight(nilai)}</p></div>', unsafe_allow_html=True)
 
 def page_dashboard():
     finora_header("Dashboard", "Ringkasan seluruh aktivitas FINORA AI")
@@ -846,17 +792,12 @@ def page_simpan():
     aid = st.selectbox("Pilih ID Analisis untuk membuka KKA lengkap", df["id"].tolist())
     if aid:
         an = fetch_analysis_by_id(aid)
-        if an is not None:
-            try:
-                summary_data = json.loads(an["summary_json"]) if an["summary_json"] else {}
-            except Exception:
-                summary_data = {}
+        if an:
+            summary_data = json.loads(an["summary_json"])
             entitas = summary_data.get("entitas", "-")
             periode = summary_data.get("periode", "-")
             score = summary_data.get("score", 0)
-            raw_flagged = summary_data.get("flagged_data", {})
-            flagged_data = {k: pd.DataFrame(v) if isinstance(v, list) else pd.DataFrame() for k, v in raw_flagged.items()}
-            
+            flagged_data = {k: pd.DataFrame(v) for k, v in summary_data.get("flagged_data", {}).items()}
             findings_df = fetch_findings(aid)
             findings_list = findings_df.to_dict("records")
             render_audit_results(findings_list, flagged_data, an["filename"], entitas, periode, score)
@@ -873,7 +814,7 @@ def page_landing():
     <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #FFF0F4 0%, #FFF5E8 100%); border-radius: 20px; margin-bottom: 40px; border: 2px solid #FF5C8B;">
         <h1 style="color: #7A1F3D; font-size: 3rem; margin-bottom: 15px; font-weight: 800;">FINORA AI</h1>
         <p style="color: #2D1B24; font-size: 1.2rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
-            Platform Kecerdasan Finansial untuk mendeteksi anomali, menyusun Kertas Kerja Audit (KKA), serta Analisis Laporan Keuangan & Cash Flow secara otomatis.
+            Platform Kecerdasan Finansial untuk mendeteksi anomali, menyusun Kertas Kerja Audit (KKA), serta Analisis Laporan Keuangan secara otomatis.
         </p>
     </div>
     """, unsafe_allow_html=True)
