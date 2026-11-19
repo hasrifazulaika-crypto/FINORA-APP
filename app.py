@@ -23,6 +23,7 @@ from reportlab.lib import colors
 # ============================================================
 LOGO_FILENAME = "logo.png"
 
+# Fungsi untuk mengonversi gambar logo ke Base64 agar bisa tampil di HTML
 def get_base64_image(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
@@ -48,6 +49,7 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 .finora-header { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%); color: white; padding: 24px; border-radius: 16px; margin-bottom: 20px; }
 .finora-header h1 { color: white; margin: 0; font-size: 30px; display: flex; align-items: center; }
 .finora-header p  { color: #FFF0F4; margin: 6px 0 0 0; }
+/* CSS Khusus Kartu Metrik Kustom */
 .metric-card {
     background: white;
     padding: 16px;
@@ -58,6 +60,7 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 }
 .metric-card p { color: #555; font-size: 14px; margin: 0; font-weight: 600; }
 .metric-card h3 { color: #7A1F3D; margin: 5px 0 0 0; font-size: 24px; font-weight: 700; }
+/* CSS Kotak Analisis */
 .insight-box {
     background-color: white;
     padding: 20px;
@@ -384,7 +387,7 @@ def audit_outliers_iqr(df, amount_col):
     return findings, flagged
 
 # ============================================================
-# SMART FINANCIAL ENGINE (+ CASH FLOW SUBSTANTIF PERUSAHAAN & PEMERINTAH)
+# SMART FINANCIAL ENGINE (+ CASH FLOW SUBSTANTIF)
 # ============================================================
 def _parse_num_series(series):
     if pd.api.types.is_numeric_dtype(series):
@@ -616,9 +619,9 @@ def auto_extract_financials(df, entity_type):
         laba = get_from_series(real_series, ["laba bersih", "laba tahun berjalan"], ["laba bersih", "net income"])
         tot_aset = get_from_series(real_series, ["total aset", "jumlah aset"], ["total aset", "total asset"])
         eq = get_from_series(real_series, ["total ekuitas", "total modal"], ["total ekuitas", "total equity"])
-        tot_liab = get_from_series(real_series, ["total liabilitas", "total utang"], ["total liabilitas", "total utang"])
+        tot_liab = get_from_series(real_series, ["total liabilitas", "total utang"], ["total liabilitas", "total utang", "kewajiban", "pinjaman"])
         aset_lancar = get_from_series(real_series, ["total aset lancar"], ["aset lancar", "current asset"])
-        liab_lancar = get_from_series(real_series, ["total liabilitas jangka pendek", "total utang lancar"], ["liabilitas jangka pendek", "utang lancar", "current liab"])
+        liab_lancar = get_from_series(real_series, ["total liabilitas jangka pendek", "total utang lancar"], ["liabilitas jangka pendek", "utang lancar", "kewajiban jangka pendek", "current liab"])
 
         if ak_op == 0 and (laba != 0 or rev != 0):
             ak_op = laba * 1.15 if laba != 0 else rev * 0.12
@@ -745,11 +748,35 @@ def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", ope
     cf_change_vs_prev = net_cf - float(prev_net_cf)
     cf_change_pct = round((cf_change_vs_prev / abs(prev_net_cf)) * 100, 2) if prev_net_cf != 0 else 0.0
 
-    curr_liab = max(float(base.get("liabilitas_lancar", 0.0)), total_outflow * 0.35 if total_outflow > 0 else 0.0)
-    total_debt = max(float(base.get("total_liabilitas", 0.0)), abs(fin_cf) * 2.0 if fin_cf != 0 else 0.0)
-    revenue_ref = max(float(base.get("pendapatan", 0.0) or base.get("real_pendapatan", 0.0)), total_inflow)
-    capex_out = abs(min(0.0, inv_cf)) if inv_cf < 0 else abs(inv_cf) * 0.5
-    debt_service = max(abs(fin_cf) * 0.5, total_outflow * 0.15) if total_outflow > 0 else 0.0
+    # Perhitungan pembagi rasio dengan fallback wajar bila data Neraca/Utang tidak ada di file
+    raw_curr_liab = float(base.get("liabilitas_lancar", 0.0))
+    raw_total_debt = float(base.get("total_liabilitas", 0.0))
+
+    if raw_curr_liab > 0:
+        curr_liab = raw_curr_liab
+    elif total_outflow > 0:
+        curr_liab = total_outflow * 0.25
+    else:
+        curr_liab = 0.0
+
+    if raw_total_debt > 0:
+        total_debt = raw_total_debt
+    elif abs(fin_cf) > 0:
+        total_debt = abs(fin_cf) * 2.0
+    elif total_outflow > 0:
+        total_debt = total_outflow * 0.5
+    else:
+        total_debt = 0.0
+
+    revenue_ref = max(
+        float(base.get("pendapatan", 0.0) or base.get("real_pendapatan", 0.0)),
+        total_inflow
+    )
+    capex_out = abs(min(0.0, inv_cf)) if inv_cf < 0 else (abs(inv_cf) * 0.5 if inv_cf != 0 else 0.0)
+    debt_service = (
+        abs(fin_cf) if abs(fin_cf) > 0
+        else (total_outflow * 0.15 if total_outflow > 0 else 0.0)
+    )
 
     ratios = {
         "Operating Cash Flow Ratio (x)": round(op_cf / curr_liab, 2) if curr_liab > 0 else 0.0,
