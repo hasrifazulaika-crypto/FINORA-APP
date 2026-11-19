@@ -1065,4 +1065,98 @@ def page_simpan():
             entitas = summary_data.get("entitas", "-")
             periode = summary_data.get("periode", "-")
             score = summary_data.get("score", 0)
-            raw_flagged = summary_data.get("flagged_da
+            raw_flagged = summary_data.get("flagged_data", {})
+            flagged_data = {k: pd.DataFrame(v) for k, v in raw_flagged.items()}
+            
+            findings_df = fetch_findings(aid)
+            findings_list = findings_df.to_dict("records")
+            render_audit_results(findings_list, flagged_data, an["filename"], entitas, periode, score)
+
+def page_landing():
+    st.markdown("""<style>[data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none; }</style>""", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        if os.path.exists(LOGO_FILENAME):
+            st.image(LOGO_FILENAME, width=250)
+        else:
+            st.markdown("<h1 style='text-align:center; font-size: 5rem;'>F</h1>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #FFF0F4 0%, #FFF5E8 100%); border-radius: 20px; margin-bottom: 40px; border: 2px solid #FF5C8B; box-shadow: 0 10px 30px rgba(255, 92, 139, 0.15);">
+        <h1 style="color: #7A1F3D; font-size: 3.5rem; margin-bottom: 15px; font-weight: 800;">FINORA AI</h1>
+        <p style="color: #2D1B24; font-size: 1.3rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+            Platform Kecerdasan Finansial untuk mendeteksi anomali (Audit) dan menyusun <b>Kertas Kerja Audit (KKA)</b> serta <b>Analisis Laporan Keuangan</b> secara otomatis.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<h2 style='text-align: center; color: #7A1F3D; margin-bottom: 30px; font-weight: 700;'>Dua Senjata Utama FINORA</h2>", unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        <div style="background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF5C8B;">
+            <div style="font-size: 3rem; margin-bottom: 15px;">🔎</div>
+            <h3 style="color: #7A1F3D; margin-bottom: 10px;">Audit Profesional</h3>
+            <p style="color: #555; font-size: 0.95rem;">Mendeteksi duplikasi, transaksi weekend, overbudget, outlier, dan anomali lainnya. Hasil siap diunduh dalam format KKA (PDF & Excel).</p>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+        <div style="background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF5C8B;">
+            <div style="font-size: 3rem; margin-bottom: 15px;">📈</div>
+            <h3 style="color: #7A1F3D; margin-bottom: 10px;">Analisis Keuangan</h3>
+            <p style="color: #555; font-size: 0.95rem;">Hitung rasio (Likuiditas, Profitabilitas, Solvabilitas) dan dapatkan *insight* prospek bisnis/pemerintahan dari AI Financial Advisor.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    col_cta1, col_cta2, col_cta3 = st.columns([1, 2, 1])
+    with col_cta2:
+        st.markdown("""<style>.stButton > button { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%) !important; color: white !important; font-size: 1.3rem !important; padding: 20px 30px !important; border-radius: 12px !important; border: none !important; font-weight: 800 !important; box-shadow: 0 6px 20px rgba(255, 92, 139, 0.4) !important; transition: all 0.3s ease !important; width: 100%; }</style>""", unsafe_allow_html=True)
+        if st.button("🚀 START YOUR ANALYSIS", use_container_width=True):
+            st.session_state.app_started = True
+            st.rerun()
+
+# ============================================================
+# MAIN (LOGIC ROUTING)
+# ============================================================
+def main():
+    if "app_started" not in st.session_state:
+        st.session_state.app_started = False
+
+    if not st.session_state.app_started:
+        page_landing()
+    else:
+        try:
+            st.sidebar.image(LOGO_FILENAME, width=180)
+        except:
+            st.sidebar.markdown('<h1 style="color:#FF5C8B;text-align:center;">F</h1>', unsafe_allow_html=True)
+            
+        st.sidebar.markdown('<p style="text-align:center;font-size:12px;color:#7A1F3D;">Financial Intelligence<br>Platform</p>', unsafe_allow_html=True)
+        st.sidebar.markdown("---")
+
+        nav = st.sidebar.radio("Navigasi", [
+            "Dashboard", 
+            "Audit Profesional", 
+            "Analisis Keuangan", 
+            "Simpan"
+        ])
+
+        st.sidebar.markdown("---")
+        if st.sidebar.button("🏠 Kembali ke Halaman Depan", use_container_width=True):
+            st.session_state.app_started = False
+            st.rerun()
+
+        st.sidebar.caption("⚠️ Temuan bersifat indikasi dan perlu verifikasi dokumen fisik.")
+
+        if nav == "Dashboard":
+            page_dashboard()
+        elif nav == "Audit Profesional":
+            page_audit()
+        elif nav == "Analisis Keuangan":
+            page_financial_analysis()
+        elif nav == "Simpan":
+            page_simpan()
+
+if __name__ == "__main__":
+    main()
