@@ -5,6 +5,7 @@ import sqlite3
 import json
 import os
 import io
+import re
 import base64
 import hashlib
 from datetime import datetime
@@ -22,7 +23,6 @@ from reportlab.lib import colors
 # ============================================================
 LOGO_FILENAME = "logo.png"
 
-# Fungsi untuk mengonversi gambar logo ke Base64 agar bisa tampil di HTML
 def get_base64_image(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
@@ -31,7 +31,11 @@ def get_base64_image(image_path):
 
 LOGO_B64 = get_base64_image(LOGO_FILENAME)
 
-st.set_page_config(page_title="FINORA AI - Pro Audit", page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F", layout="wide")
+st.set_page_config(
+    page_title="FINORA AI - Pro Audit",
+    page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F",
+    layout="wide",
+)
 
 st.markdown("""
 <style>
@@ -44,7 +48,6 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 .finora-header { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%); color: white; padding: 24px; border-radius: 16px; margin-bottom: 20px; }
 .finora-header h1 { color: white; margin: 0; font-size: 30px; display: flex; align-items: center; }
 .finora-header p  { color: #FFF0F4; margin: 6px 0 0 0; }
-/* CSS Khusus Kartu Metrik Kustom */
 .metric-card {
     background: white;
     padding: 16px;
@@ -55,7 +58,6 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 }
 .metric-card p { color: #555; font-size: 14px; margin: 0; font-weight: 600; }
 .metric-card h3 { color: #7A1F3D; margin: 5px 0 0 0; font-size: 24px; font-weight: 700; }
-/* CSS Kotak Analisis */
 .insight-box {
     background-color: white;
     padding: 20px;
@@ -73,10 +75,14 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 # FUNGSI PEMBANTU FORMAT ANGKA & KARTU
 # ============================================================
 def format_rupiah(val):
-    if abs(val) >= 1_000_000_000_000: return f"Rp {val/1_000_000_000_000:,.2f} T"
-    elif abs(val) >= 1_000_000_000: return f"Rp {val/1_000_000_000:,.2f} M"
-    elif abs(val) >= 1_000_000: return f"Rp {val/1_000_000:,.2f} Jt"
-    else: return f"Rp {val:,.0f}"
+    if abs(val) >= 1_000_000_000_000:
+        return f"Rp {val/1_000_000_000_000:,.2f} T"
+    elif abs(val) >= 1_000_000_000:
+        return f"Rp {val/1_000_000_000:,.2f} M"
+    elif abs(val) >= 1_000_000:
+        return f"Rp {val/1_000_000:,.2f} Jt"
+    else:
+        return f"Rp {val:,.0f}"
 
 def metric_card(label, value, help_text=""):
     st.markdown(f"""
@@ -104,42 +110,53 @@ def init_db():
     CREATE TABLE IF NOT EXISTS analyses (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, mode TEXT, selected_modules TEXT, status TEXT, summary_json TEXT, created_at TEXT);
     CREATE TABLE IF NOT EXISTS findings (id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_id INTEGER, module TEXT, risk_level TEXT, title TEXT, detail TEXT, recommendation TEXT);
     """)
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 init_db()
 
 def save_file(filename, content_bytes):
     file_hash = hashlib.md5(content_bytes).hexdigest()
-    conn = get_conn(); c = conn.cursor()
+    conn = get_conn()
+    c = conn.cursor()
     c.execute("SELECT id FROM files WHERE file_hash=?", (file_hash,))
     row = c.fetchone()
     if row:
-        conn.close(); return row["id"]
+        conn.close()
+        return row["id"]
     c.execute("INSERT INTO files(filename, file_hash, uploaded_at) VALUES (?,?,?)",
               (filename, file_hash, datetime.now().isoformat()))
-    fid = c.lastrowid; conn.commit(); conn.close()
+    fid = c.lastrowid
+    conn.commit()
+    conn.close()
     return fid
 
 def save_analysis(file_id, mode, selected_modules, summary):
-    conn = get_conn(); c = conn.cursor()
+    conn = get_conn()
+    c = conn.cursor()
     c.execute("INSERT INTO analyses(file_id, mode, selected_modules, status, summary_json, created_at) VALUES (?,?,?,?,?,?)",
               (file_id, mode, json.dumps(selected_modules), "completed", json.dumps(summary, default=str), datetime.now().isoformat()))
-    aid = c.lastrowid; conn.commit(); conn.close()
+    aid = c.lastrowid
+    conn.commit()
+    conn.close()
     return aid
 
 def save_findings(analysis_id, findings):
     if not findings:
         return
-    conn = get_conn(); c = conn.cursor()
+    conn = get_conn()
+    c = conn.cursor()
     for f in findings:
         c.execute("INSERT INTO findings(analysis_id, module, risk_level, title, detail, recommendation) VALUES (?,?,?,?,?,?)",
                   (analysis_id, f["module"], f["risk_level"], f["title"], f["detail"], f["recommendation"]))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def fetch_analyses():
     conn = get_conn()
     df = pd.read_sql_query("SELECT a.id, f.filename, a.mode, a.created_at FROM analyses a JOIN files f ON a.file_id = f.id ORDER BY a.created_at DESC", conn)
-    conn.close(); return df
+    conn.close()
+    return df
 
 def fetch_analysis_by_id(aid):
     conn = get_conn()
@@ -148,12 +165,14 @@ def fetch_analysis_by_id(aid):
         FROM analyses a JOIN files f ON a.file_id = f.id 
         WHERE a.id=?
     """, conn, params=(aid,))
-    conn.close(); return df.iloc[0] if not df.empty else None
+    conn.close()
+    return df.iloc[0] if not df.empty else None
 
 def fetch_findings(aid):
     conn = get_conn()
     df = pd.read_sql_query("SELECT * FROM findings WHERE analysis_id=?", conn, params=(aid,))
-    conn.close(); return df
+    conn.close()
+    return df
 
 # ============================================================
 # AI ENGINE
@@ -189,19 +208,21 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
                 stream = client.interactions.create(model=model_id, input=full_prompt, stream=True)
                 for event in stream:
                     delta = getattr(event, "delta", None)
-                    if delta and getattr(delta, "text", None): yield delta.text
-                    elif getattr(event, "text", None): yield event.text
+                    if delta and getattr(delta, "text", None):
+                        yield delta.text
+                    elif getattr(event, "text", None):
+                        yield event.text
                 return
             except Exception:
-                pass 
+                pass
 
         response_stream = client.models.generate_content_stream(model=model_id, contents=full_prompt)
         for chunk in response_stream:
-            if getattr(chunk, "text", None): yield chunk.text
+            if getattr(chunk, "text", None):
+                yield chunk.text
 
     except Exception as e:
         yield f"\n\n⚠️ Terjadi kesalahan: {str(e)}"
-
 
 def read_uploaded_dataframe(uploaded_file, header_row=0):
     name = uploaded_file.name.lower()
@@ -224,7 +245,6 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
             pass
         if not text_lines:
             try:
-                from reportlab.pdfbase import pdfmetrics
                 decoded = raw_bytes.decode("latin-1", errors="ignore")
                 for part in decoded.split("BT"):
                     clean_part = "".join(ch if 32 <= ord(ch) <= 126 else " " for ch in part).strip()
@@ -233,7 +253,6 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
             except Exception:
                 pass
         rows = []
-        import re
         for line in text_lines:
             nums = re.findall(r'-?\d[\d.,]*', line)
             nominal = 0.0
@@ -249,8 +268,24 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
         return pd.DataFrame(rows)
     return pd.read_csv(uploaded_file, header=header_row)
 
+def extract_text_preview(uploaded_file, df):
+    lines = []
+    if uploaded_file.name.lower().endswith(".pdf"):
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(uploaded_file.getvalue()))
+            for i, page in enumerate(reader.pages[:3]):
+                t = (page.extract_text() or "").strip()
+                if t:
+                    lines.append(f"[Halaman {i+1}] {t[:800]}")
+        except Exception:
+            pass
+    if not lines and df is not None and not df.empty:
+        lines.append(df.head(15).to_string())
+    return "\n".join(lines)[:2500]
+
 # ============================================================
-# AUDIT ENGINE V5 (FITUR LAMA - AMAN)
+# AUDIT ENGINE V5
 # ============================================================
 def auto_detect_columns(df):
     mapping = {"date": None, "amount": None, "desc": None, "debit": None, "credit": None, "budget": None, "invoice": None}
@@ -270,7 +305,8 @@ def audit_empty(df, cols_to_check):
     masks = [df[c].isna() for c in cols_to_check if c]
     if masks:
         combined_mask = masks[0]
-        for m in masks[1:]: combined_mask |= m
+        for m in masks[1:]:
+            combined_mask |= m
         flagged = df[combined_mask]
         if not flagged.empty:
             findings.append({"module": "Kelengkapan Data", "risk_level": "Tinggi", "title": f"{len(flagged)} baris memiliki data vital kosong", "detail": "Ada data kosong pada kolom Tanggal/Nominal/Deskripsi.", "recommendation": "Lengkapi data sebelum diproses."})
@@ -302,7 +338,8 @@ def audit_overbudget(df, budget_col, amount_col):
             flagged = df[a > b]
             if not flagged.empty:
                 findings.append({"module": "Overbudget (Melebihi Pagu)", "risk_level": "Tinggi", "title": f"{len(flagged)} akun melebihi pagu anggaran", "detail": "Nilai realisasi lebih besar daripada anggaran.", "recommendation": "Minta penjelasan terkait kelebihan anggaran."})
-        except: pass
+        except Exception:
+            pass
     return findings, flagged
 
 def audit_weekend(df, date_col):
@@ -313,7 +350,8 @@ def audit_weekend(df, date_col):
             flagged = df[dates.dt.dayofweek >= 5]
             if not flagged.empty:
                 findings.append({"module": "Transaksi Weekend", "risk_level": "Tinggi", "title": f"{len(flagged)} transaksi di hari Sabtu/Minggu", "detail": "Transaksi di luar hari kerja.", "recommendation": "Periksa otorisasi transaksi akhir pekan."})
-        except: pass
+        except Exception:
+            pass
     return findings, flagged
 
 def audit_suspicious_words(df, desc_col):
@@ -325,7 +363,8 @@ def audit_suspicious_words(df, desc_col):
             flagged = df[df[desc_col].astype(str).str.lower().str.contains(pattern, na=False)]
             if not flagged.empty:
                 findings.append({"module": "Kata Kunci Mencurigakan", "risk_level": "Sedang", "title": f"{len(flagged)} transaksi mengandung kata kunci adjustment/void", "detail": "Transaksi manual sering menjadi celah manipulasi.", "recommendation": "Minta penjelasan tertulis dari pembuat jurnal."})
-        except: pass
+        except Exception:
+            pass
     return findings, flagged
 
 def audit_outliers_iqr(df, amount_col):
@@ -340,11 +379,12 @@ def audit_outliers_iqr(df, amount_col):
                 flagged = df[(pd.to_numeric(df[amount_col], errors="coerce") < lower) | (pd.to_numeric(df[amount_col], errors="coerce") > upper)]
                 if not flagged.empty:
                     findings.append({"module": "Anomali Nominal (Outlier)", "risk_level": "Tinggi", "title": f"{len(flagged)} nilai ekstrem (di luar batas IQR)", "detail": f"Batas wajar: {lower:,.0f} s.d {upper:,.0f}", "recommendation": "Uji petik transaksi terbesar/terkecil."})
-        except: pass
+        except Exception:
+            pass
     return findings, flagged
 
 # ============================================================
-# SMART FINANCIAL ENGINE (+ CASH FLOW)
+# SMART FINANCIAL ENGINE (+ CASH FLOW SUBSTANTIF)
 # ============================================================
 def auto_extract_financials(df, entity_type):
     results = {
@@ -356,27 +396,32 @@ def auto_extract_financials(df, entity_type):
         "arus_kas_operasi": 0.0, "arus_kas_investasi": 0.0, "arus_kas_pendanaan": 0.0,
         "arus_kas_bersih": 0.0, "saldo_kas_akhir": 0.0
     }
-    
+
     str_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
     num_cols = df.select_dtypes(include=['number', 'float', 'int']).columns.tolist()
-    
-    if not str_cols or not num_cols: return results
 
-    name_col = str_cols[0] 
-    
+    if not str_cols or not num_cols:
+        return results
+
+    name_col = str_cols[0]
     real_col, ang_col = None, None
     for c in num_cols:
         c_str = str(c).lower()
-        if 'realisasi' in c_str or 'real' in c_str: real_col = c
-        elif 'anggaran' in c_str or 'ang' in c_str or 'pagu' in c_str: ang_col = c
-    
-    if not real_col and len(num_cols) > 0: real_col = num_cols[0]
-    if not ang_col and len(num_cols) > 1: ang_col = num_cols[1]
+        if 'realisasi' in c_str or 'real' in c_str:
+            real_col = c
+        elif 'anggaran' in c_str or 'ang' in c_str or 'pagu' in c_str:
+            ang_col = c
+
+    if not real_col and len(num_cols) > 0:
+        real_col = num_cols[0]
+    if not ang_col and len(num_cols) > 1:
+        ang_col = num_cols[1]
 
     clean_names = df[name_col].astype(str).str.lower().str.replace(r'[^a-z\s]', '', regex=True).str.strip()
 
     def get_total(target_col, exact_keys, contains_keys=[]):
-        if not target_col: return 0.0
+        if not target_col:
+            return 0.0
         if exact_keys:
             mask_exact = clean_names.isin(exact_keys)
             if mask_exact.any():
@@ -394,19 +439,23 @@ def auto_extract_financials(df, entity_type):
 
     if "Pemerintahan" in entity_type:
         real_p = get_total(real_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
-        if real_p == 0: real_p = get_total(real_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
+        if real_p == 0:
+            real_p = get_total(real_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
         ang_p = get_total(ang_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
-        if ang_p == 0: ang_p = get_total(ang_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
+        if ang_p == 0:
+            ang_p = get_total(ang_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
 
         real_b = get_total(real_col, ['total belanja', 'jumlah belanja', 'belanja daerah', 'belanja'])
-        if real_b == 0: real_b = get_total(real_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
+        if real_b == 0:
+            real_b = get_total(real_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
         ang_b = get_total(ang_col, ['total belanja', 'jumlah belanja', 'belanja daerah', 'belanja'])
-        if ang_b == 0: ang_b = get_total(ang_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
+        if ang_b == 0:
+            ang_b = get_total(ang_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
 
         pad = get_total(real_col, ['pendapatan asli daerah', 'jumlah pendapatan asli daerah', 'total pendapatan asli daerah', 'pad'], ['pendapatan asli daerah'])
-
         surplus = get_total(real_col, [], ['surplus', 'defisit'])
-        if surplus == 0: surplus = real_p - real_b
+        if surplus == 0:
+            surplus = real_p - real_b
 
         if ak_op == 0 and (real_p != 0 or real_b != 0):
             ak_op = real_p - (real_b * 0.8)
@@ -425,7 +474,6 @@ def auto_extract_financials(df, entity_type):
             "arus_kas_operasi": ak_op, "arus_kas_investasi": ak_inv, "arus_kas_pendanaan": ak_fin,
             "arus_kas_bersih": ak_bersih, "saldo_kas_akhir": kas_akhir
         })
-
     else:
         rev = get_total(real_col, ['total pendapatan', 'pendapatan', 'total penjualan', 'penjualan'], ['pendapatan', 'penjualan', 'revenue'])
         laba = get_total(real_col, ['laba bersih', 'laba tahun berjalan'], ['laba bersih', 'net income'])
@@ -460,6 +508,194 @@ def auto_extract_financials(df, entity_type):
 
     return results
 
+def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", opening_cash=0.0, prev_net_cf=0.0):
+    base = auto_extract_financials(df, entity_type)
+    cols_lower = {str(c).lower().strip(): c for c in df.columns}
+
+    def find_col(keywords):
+        for k in keywords:
+            for cl, orig in cols_lower.items():
+                if k in cl:
+                    return orig
+        return None
+
+    date_col = find_col(["tanggal", "tgl", "date", "periode", "bulan"])
+    desc_col = find_col(["keterangan", "uraian", "deskripsi", "transaksi", "nama", "akun"])
+    cat_col = find_col(["kategori", "category", "aktivitas", "jenis", "tipe"])
+    inflow_col = find_col(["kas masuk", "cash inflow", "inflow", "penerimaan", "debit", "masuk"])
+    outflow_col = find_col(["kas keluar", "cash outflow", "outflow", "pengeluaran", "kredit", "keluar"])
+    amt_col = find_col(["nominal", "jumlah", "nilai", "amount", "realisasi", "saldo"])
+
+    is_ledger = (inflow_col is not None) or (outflow_col is not None)
+
+    inflow_series = pd.Series(0.0, index=df.index)
+    outflow_series = pd.Series(0.0, index=df.index)
+
+    if is_ledger:
+        if inflow_col:
+            inflow_series = pd.to_numeric(df[inflow_col], errors="coerce").fillna(0.0).abs()
+        if outflow_col:
+            outflow_series = pd.to_numeric(df[outflow_col], errors="coerce").fillna(0.0).abs()
+        total_inflow = float(inflow_series.sum())
+        total_outflow = float(outflow_series.sum())
+        net_cf = total_inflow - total_outflow
+    else:
+        ak_op_check = float(base.get("arus_kas_operasi", 0.0))
+        ak_inv_check = float(base.get("arus_kas_investasi", 0.0))
+        ak_fin_check = float(base.get("arus_kas_pendanaan", 0.0))
+        if any(abs(x) > 0 for x in [ak_op_check, ak_inv_check, ak_fin_check]):
+            pos_parts = sum(max(0.0, x) for x in [ak_op_check, ak_inv_check, ak_fin_check])
+            neg_parts = sum(abs(min(0.0, x)) for x in [ak_op_check, ak_inv_check, ak_fin_check])
+            total_inflow = pos_parts if pos_parts > 0 else max(0.0, float(base.get("pendapatan", 0.0) or base.get("real_pendapatan", 0.0)))
+            total_outflow = neg_parts if neg_parts > 0 else max(0.0, float(base.get("real_belanja", 0.0)))
+            net_cf = float(base.get("arus_kas_bersih", ak_op_check + ak_inv_check + ak_fin_check))
+        else:
+            s_num = pd.to_numeric(df[amt_col], errors="coerce").fillna(0.0) if amt_col else pd.Series(0.0, index=df.index)
+            total_inflow = float(s_num[s_num > 0].sum())
+            total_outflow = float(s_num[s_num < 0].abs().sum())
+            net_cf = total_inflow - total_outflow
+
+    op_cf = float(base.get("arus_kas_operasi", 0.0))
+    inv_cf = float(base.get("arus_kas_investasi", 0.0))
+    fin_cf = float(base.get("arus_kas_pendanaan", 0.0))
+
+    if is_ledger:
+        text_cat = df[cat_col].astype(str).str.lower() if cat_col else pd.Series("", index=df.index)
+        text_desc = df[desc_col].astype(str).str.lower() if desc_col else pd.Series("", index=df.index)
+        combined_txt = text_cat + " " + text_desc
+
+        signed_tx = inflow_series - outflow_series
+        inv_mask = combined_txt.str.contains("invest|aset tetap|modal|peralatan|gedung|kendaraan|saham|obligasi", na=False)
+        fin_mask = combined_txt.str.contains("pendanaan|pinjam|utang|hutang|modal disetor|dividen|obligasi bank|kredit", na=False)
+        op_mask = ~(inv_mask | fin_mask)
+
+        op_cf = float(signed_tx[op_mask].sum())
+        inv_cf = float(signed_tx[inv_mask].sum())
+        fin_cf = float(signed_tx[fin_mask].sum())
+
+        if op_cf == 0 and inv_cf == 0 and fin_cf == 0 and net_cf != 0:
+            op_cf = net_cf
+
+    rekon_diff = 0.0
+    if opening_cash != 0.0:
+        ending_cash = float(opening_cash) + net_cf
+        reported_end = float(base.get("saldo_kas_akhir", 0.0))
+        if reported_end != 0.0 and not is_ledger:
+            rekon_diff = ending_cash - reported_end
+    else:
+        reported_end = float(base.get("saldo_kas_akhir", 0.0))
+        if reported_end != 0.0 and not is_ledger:
+            ending_cash = reported_end
+            opening_cash = ending_cash - net_cf
+        else:
+            opening_cash = 0.0
+            ending_cash = net_cf
+
+    cf_change_vs_prev = net_cf - float(prev_net_cf)
+    cf_change_pct = round((cf_change_vs_prev / abs(prev_net_cf)) * 100, 2) if prev_net_cf != 0 else 0.0
+
+    curr_liab = max(float(base.get("liabilitas_lancar", 0.0)), total_outflow * 0.35 if total_outflow > 0 else 0.0)
+    total_debt = max(float(base.get("total_liabilitas", 0.0)), abs(fin_cf) * 2.0 if fin_cf != 0 else 0.0)
+    revenue_ref = max(float(base.get("pendapatan", 0.0) or base.get("real_pendapatan", 0.0)), total_inflow)
+    capex_out = abs(min(0.0, inv_cf)) if inv_cf < 0 else abs(inv_cf) * 0.5
+    debt_service = max(abs(fin_cf) * 0.5, total_outflow * 0.15) if total_outflow > 0 else 0.0
+
+    ratios = {
+        "Operating Cash Flow Ratio (x)": round(op_cf / curr_liab, 2) if curr_liab > 0 else 0.0,
+        "Cash Flow to Debt Ratio (%)": round((op_cf / total_debt) * 100, 2) if total_debt > 0 else 0.0,
+        "Cash Flow Margin (%)": round((op_cf / revenue_ref) * 100, 2) if revenue_ref > 0 else 0.0,
+        "Free Cash Flow (FCF)": round(op_cf - capex_out, 2),
+        "Cash Flow Coverage (x)": round(op_cf / debt_service, 2) if debt_service > 0 else 0.0,
+    }
+
+    trend_df = pd.DataFrame()
+    if is_ledger and date_col:
+        tmp = pd.DataFrame({
+            "dt": pd.to_datetime(df[date_col], errors="coerce"),
+            "Kas Masuk": inflow_series,
+            "Kas Keluar": outflow_series,
+            "Operasi": np.where(
+                ~(
+                    (df[cat_col].astype(str).str.lower() + " " + (df[desc_col].astype(str).str.lower() if desc_col else "")).str.contains("invest|aset tetap|pendanaan|pinjam|utang|dividen", na=False)
+                ) if cat_col else True,
+                inflow_series - outflow_series,
+                0.0
+            )
+        })
+        if tmp["dt"].notna().any():
+            tmp["Periode"] = tmp["dt"].dt.to_period("M").astype(str)
+            trend_df = tmp.dropna(subset=["dt"]).groupby("Periode", as_index=False)[["Kas Masuk", "Kas Keluar", "Operasi"]].sum()
+            trend_df["Net Cash Flow"] = trend_df["Kas Masuk"] - trend_df["Kas Keluar"]
+            trend_df["Saldo Kas Kumulatif"] = float(opening_cash) + trend_df["Net Cash Flow"].cumsum()
+
+    if trend_df.empty:
+        trend_df = pd.DataFrame({
+            "Periode": ["Periode Lalu", "Periode Berjalan"],
+            "Kas Masuk": [max(0.0, float(prev_net_cf) + total_outflow * 0.8), total_inflow],
+            "Kas Keluar": [max(0.0, total_outflow * 0.85), total_outflow],
+            "Net Cash Flow": [float(prev_net_cf), net_cf],
+            "Saldo Kas Kumulatif": [float(opening_cash), float(ending_cash)]
+        })
+
+    anomalies = []
+    if op_cf < 0:
+        anomalies.append(("Tinggi", "Arus Kas Operasi Negatif", f"Arus kas operasi tercatat {format_rupiah(op_cf)}. Aktivitas utama belum menghasilkan kas bersih positif.", "Evaluasi efisiensi penagihan piutang, pengendalian biaya operasional, dan modal kerja."))
+    if total_outflow > total_inflow and (total_inflow > 0 or total_outflow > 0):
+        anomalies.append(("Tinggi", "Pengeluaran Lebih Besar daripada Penerimaan", f"Total kas keluar ({format_rupiah(total_outflow)}) melampaui total kas masuk ({format_rupiah(total_inflow)}).", "Tinjau prioritas pengeluaran, tunda belanja non-esensial, dan percepat arus kas masuk."))
+    if ending_cash < opening_cash or ending_cash < 0:
+        anomalies.append(("Sedang", "Saldo Kas Menurun / Tertekan", f"Saldo kas akhir ({format_rupiah(ending_cash)}) lebih rendah dibanding saldo awal ({format_rupiah(opening_cash)}).", "Pantau posisi likuiditas harian/bulanan dan siapkan cadangan kas darurat."))
+    if fin_cf > 0 and (op_cf <= 0 or (abs(op_cf) > 0 and fin_cf > abs(op_cf))):
+        anomalies.append(("Sedang", "Ketergantungan pada Pendanaan / Pinjaman", f"Arus kas pendanaan positif ({format_rupiah(fin_cf)}) sementara kas operasi lemah/negatif ({format_rupiah(op_cf)}).", "Hindari pembiayaan utang berulang untuk menutup kebutuhan operasional rutin."))
+    if abs(rekon_diff) > 1.0:
+        anomalies.append(("Tinggi", "Ketidaksesuaian Perubahan Saldo Kas & Laporan", f"Selisih rekonsiliasi antara (Saldo Awal + Net Cash Flow) dan Saldo Kas Akhir sebesar {format_rupiah(rekon_diff)}.", "Periksa kembali mutasi kas, saldo awal, atau akun kas yang belum terklasifikasi."))
+    if len(trend_df) >= 2 and trend_df["Kas Keluar"].iloc[-1] > trend_df["Kas Keluar"].iloc[-2] * 1.3 and trend_df["Kas Keluar"].iloc[-2] > 0:
+        spike = round(((trend_df["Kas Keluar"].iloc[-1] - trend_df["Kas Keluar"].iloc[-2]) / trend_df["Kas Keluar"].iloc[-2]) * 100, 1)
+        anomalies.append(("Sedang", "Kenaikan Pengeluaran Tidak Wajar", f"Kas keluar pada periode terakhir melonjak {spike}% dibanding periode sebelumnya.", "Lakukan uji petik transaksi besar atau tidak berulang pada periode lonjakan."))
+    if is_ledger and (inflow_series > 0).any():
+        pos_vals = inflow_series[inflow_series > 0]
+        med = float(pos_vals.median())
+        if med > 0 and float(pos_vals.max()) > med * 5:
+            anomalies.append(("Rendah", "Transaksi Kas dengan Nilai / Pola Tidak Biasa", f"Terdapat transaksi kas masuk ekstrem ({format_rupiah(float(pos_vals.max()))}) dibanding median ({format_rupiah(med)}).", "Verifikasi dokumen pendukung transaksi bernilai besar tersebut."))
+
+    if op_cf > 0 and fin_cf <= 0:
+        sumber_kas = "Kas terutama diperoleh dari aktivitas operasional utama (penerimaan inti) dan relatif mandiri dari tambahan pinjaman/pendanaan eksternal."
+    elif fin_cf > 0 and op_cf <= 0:
+        sumber_kas = "Kas banyak ditopang oleh arus kas pendanaan/pinjaman eksternal karena arus kas operasi belum mencukupi."
+    else:
+        sumber_kas = "Kas berasal dari kombinasi aktivitas operasional, investasi, dan/atau pendanaan; perlu dipastikan proporsi kas operasi tetap dominan dan sehat."
+
+    if inv_cf < 0:
+        penggunaan_kas = f"Kas digunakan untuk membiayai kegiatan operasional serta pengeluaran investasi/belanja modal sebesar {format_rupiah(abs(inv_cf))}."
+    elif total_outflow > 0:
+        penggunaan_kas = f"Kas digunakan untuk membiayai kewajiban operasional, beban berjalan, dan/atau aktivitas pendanaan dengan total kas keluar {format_rupiah(total_outflow)}."
+    else:
+        penggunaan_kas = "Belum teridentifikasi pengeluaran kas signifikan pada data yang diunggah."
+
+    if op_cf > 0 and net_cf >= 0 and len([a for a in anomalies if a[0] == "Tinggi"]) == 0:
+        kemampuan_kelola = "Kemampuan pengelolaan kas tergolong sehat: arus kas operasi positif dan mampu menopang kebutuhan kas serta kewajiban jangka pendek."
+    else:
+        kemampuan_kelola = "Kemampuan pengelolaan kas perlu diperkuat: terdapat tekanan pada arus kas operasi, keseimbangan kas masuk/keluar, atau anomali yang perlu ditindaklanjuti."
+
+    return {
+        "total_inflow": total_inflow,
+        "total_outflow": total_outflow,
+        "net_cf": net_cf,
+        "opening_cash": opening_cash,
+        "ending_cash": ending_cash,
+        "cf_change_vs_prev": cf_change_vs_prev,
+        "cf_change_pct": cf_change_pct,
+        "op_cf": op_cf,
+        "inv_cf": inv_cf,
+        "fin_cf": fin_cf,
+        "ratios": ratios,
+        "trend_df": trend_df,
+        "anomalies": anomalies,
+        "sumber_kas": sumber_kas,
+        "penggunaan_kas": penggunaan_kas,
+        "kemampuan_kelola": kemampuan_kelola,
+        "is_ledger": is_ledger
+    }
+
 def hitung_rasio_dari_nilai(nilai, entity_type):
     rasio = {}
     if "Pemerintahan" in entity_type:
@@ -468,11 +704,11 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
         real_b = nilai.get("real_belanja", 0)
         ang_b = nilai.get("ang_belanja", 0)
         pad = nilai.get("pad", 0)
-        
+
         rasio["Efektivitas Pendapatan (%)"] = round((real_p / ang_p) * 100, 2) if ang_p > 0 else 0.0
         rasio["Efisiensi Belanja (%)"] = round((real_b / ang_b) * 100, 2) if ang_b > 0 else 0.0
         rasio["Kemandirian Daerah (%)"] = round((pad / real_p) * 100, 2) if real_p > 0 else 0.0
-        rasio["Pertumbuhan Pendapatan (%)"] = 0.0 
+        rasio["Pertumbuhan Pendapatan (%)"] = 0.0
     else:
         pendapatan = nilai.get("pendapatan", 0)
         laba = nilai.get("laba", 0)
@@ -490,77 +726,62 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
     return rasio
 
 def get_detailed_insight(ratio_name, val):
-    """Memberikan penjelasan panjang dengan format HTML (tanpa bintang) dan menangani nilai 0."""
-    
     if val == 0 or pd.isna(val):
         if "Pertumbuhan" in ratio_name:
             return "<b>Kondisi:</b> 0% (Tidak Ada Data Pertumbuhan / Stagnan).<br><b>Penyebab:</b> Sistem saat ini hanya memproses data 1 periode (tahun berjalan). Untuk menghitung pertumbuhan (YoY), dibutuhkan data Realisasi Pendapatan Tahun Sebelumnya.<br><b>Dampak:</b> Tidak dapat melihat tren naik/turunnya pendapatan dari tahun ke tahun.<br><b>Rekomendasi:</b> Simpan laporan tahun ini, lalu bandingkan dengan laporan tahun depan. Atau, upload file Excel yang memiliki kolom 'Realisasi Tahun Lalu' agar sistem dapat menghitung rasio pertumbuhan secara otomatis."
         elif "Efektivitas" in ratio_name:
-            return "<b>Kondisi:</b> Rasio 0% (Tidak Terdefinisi).<br><b>Penyebab:</b> Nilai Anggaran Pendapatan di file Excel bernilai 0 atau tidak terbaca oleh sistem. Jika Anggaran 0, rasio tidak bisa dihitung.<br><b>Dampak:</b> Tidak bisa mengukur kinerja pemungutan pendapatan.<br><b>Rekomendasi:</b> Periksa kembali apakah kolom Anggaran Pendapatan sudah terisi angka yang benar dan bukan teks."
+            return "<b>Kondisi:</b> Rasio 0% (Tidak Terdefinisi).<br><b>Penyebab:</b> Nilai Anggaran Pendapatan di file Excel bernilai 0 atau tidak terbaca oleh sistem.<br><b>Dampak:</b> Tidak bisa mengukur kinerja pemungutan pendapatan.<br><b>Rekomendasi:</b> Periksa kembali apakah kolom Anggaran Pendapatan sudah terisi angka yang benar dan bukan teks."
         elif "Efisiensi" in ratio_name:
             return "<b>Kondisi:</b> Rasio 0% (Tidak Terdefinisi).<br><b>Penyebab:</b> Nilai Anggaran Belanja di file Excel bernilai 0 atau tidak terbaca.<br><b>Dampak:</b> Tidak bisa mengukur tingkat penyerapan anggaran.<br><b>Rekomendasi:</b> Pastikan kolom Anggaran Belanja memiliki nominal yang valid."
         elif "Kemandirian" in ratio_name:
-            return "<b>Kondisi:</b> Rasio 0% (Tidak Ada PAD).<br><b>Penyebab:</b> Realisasi Pendapatan Asli Daerah (PAD) bernilai 0, atau Total Pendapatan bernilai 0.<br><b>Dampak:</b> Daerah sepenuhnya bergantung pada dana transfer pusat (Tidak Mandiri).<br><b>Rekomendasi:</b> Lakukan ekstensifikasi pajak dan retribusi daerah. Jika PAD memang nol, periksa kembali apakah data sudah diinput dengan benar."
+            return "<b>Kondisi:</b> Rasio 0% (Tidak Ada PAD).<br><b>Penyebab:</b> Realisasi Pendapatan Asli Daerah (PAD) bernilai 0, atau Total Pendapatan bernilai 0.<br><b>Dampak:</b> Daerah sepenuhnya bergantung pada dana transfer pusat (Tidak Mandiri).<br><b>Rekomendasi:</b> Lakukan ekstensifikasi pajak dan retribusi daerah."
         elif "Current Ratio" in ratio_name:
-            return "<b>Kondisi:</b> Rasio 0x (Risiko Likuiditas Ekstrem).<br><b>Penyebab:</b> Aset Lancar bernilai 0 atau tidak ada utang jangka pendek.<br><b>Dampak:</b> Perusahaan tidak memiliki kas/aset lancar untuk beroperasi.<br><b>Rekomendasi:</b> Segera tambah modal kerja atau likuidasi aset tidak lancar untuk mendapatkan kas."
+            return "<b>Kondisi:</b> Rasio 0x (Risiko Likuiditas Ekstrem).<br><b>Penyebab:</b> Aset Lancar bernilai 0 atau tidak ada utang jangka pendek.<br><b>Dampak:</b> Perusahaan tidak memiliki kas/aset lancar untuk beroperasi.<br><b>Rekomendasi:</b> Segera tambah modal kerja atau evaluasi likuiditas."
         elif "Debt to Equity" in ratio_name:
-            return "<b>Kondisi:</b> Rasio 0x (Sangat Aman / Tidak Ada Utang).<br><b>Penyebab:</b> Total Liabilitas/Utang bernilai 0, atau Ekuitas bernilai 0 (jika ekuitas 0, ini berbahaya).<br><b>Dampak:</b> Jika utang 0, perusahaan bebas beban bunga (sangat sehat).<br><b>Rekomendasi:</b> Jika ingin ekspansi, perusahaan bisa mulai memanfaatkan utang produktif secara bijak untuk <i>leverage</i> yang menguntungkan."
+            return "<b>Kondisi:</b> Rasio 0x (Sangat Aman / Tidak Ada Utang).<br><b>Penyebab:</b> Total Liabilitas/Utang bernilai 0, atau Ekuitas bernilai 0.<br><b>Dampak:</b> Beban bunga minimal jika utang memang 0.<br><b>Rekomendasi:</b> Jika ingin ekspansi, gunakan utang produktif secara terukur."
         else:
-            return "<b>Kondisi:</b> Rasio tidak dapat dihitung (0 atau Kosong).<br><b>Penyebab:</b> Data pembentuk rasio tidak ditemukan dalam file yang diunggah.<br><b>Rekomendasi:</b> Periksa format file Excel Anda dan pastikan nama akun sesuai standar."
+            return "<b>Kondisi:</b> Rasio tidak dapat dihitung (0 atau Kosong).<br><b>Penyebab:</b> Data pembentuk rasio tidak ditemukan dalam file yang diunggah.<br><b>Rekomendasi:</b> Periksa format file yang diunggah dan pastikan nama akun sesuai standar."
 
     if "Efektivitas" in ratio_name:
         if val >= 100:
-            return "<b>Kondisi:</b> Sangat Baik. Realisasi melampaui target anggaran.<br><b>Penyebab:</b> Kinerja pemungutan pajak/retribusi yang optimal, kepatuhan wajib pajak tinggi, atau pertumbuhan ekonomi daerah yang positif.<br><b>Dampak:</b> Meningkatkan kapasitas fiskal dan ruang belanja daerah.<br><b>Rekomendasi:</b> Pertahankan sistem pemungutan yang ada. Mulai eksplorasi sumber PAD baru (digitalisasi retribusi, potensi pariwisata) agar tidak <i>over-reliance</i> pada satu sektor."
+            return "<b>Kondisi:</b> Sangat Baik. Realisasi melampaui target anggaran.<br><b>Rekomendasi:</b> Pertahankan kinerja pemungutan dan eksplorasi potensi pendapatan berkelanjutan."
         elif val >= 90:
-            return "<b>Kondisi:</b> Baik. Realisasi hampir mencapai target.<br><b>Penyebab:</b> Pemungutan berjalan sesuai rencana, meski ada sedikit hambatan administratif.<br><b>Dampak:</b> Keuangan daerah stabil.<br><b>Rekomendasi:</b> Tingkatkan pengawasan kepatuhan wajib pajak/retribusi. Lakukan audit internal ringan untuk memastikan tidak ada kebocoran pendapatan di lapangan."
+            return "<b>Kondisi:</b> Baik. Realisasi hampir mencapai target.<br><b>Rekomendasi:</b> Tingkatkan pengawasan kepatuhan dan evaluasi pos pendapatan yang masih di bawah target."
         else:
-            return "<b>Kondisi:</b> Kurang. Target pendapatan tidak tercapai secara signifikan.<br><b>Penyebab:</b> Target anggaran terlalu tinggi (tidak realistis), penurunan aktivitas ekonomi, atau lemahnya penegakan hukum pajak/retribusi.<br><b>Dampak:</b> Defisit anggaran, program pembangunan terhambat, dan berpotensi memotong belanja modal.<br><b>Rekomendasi:</b> Lakukan <b>Intensifikasi</b> (pemeriksaan pajak, penagihan aktif) dan <b>Ekstensifikasi</b> (mencari wajib pajak baru). Jika target memang terlalu tinggi, ajukan revisi target secara proporsional."
-            
+            return "<b>Kondisi:</b> Kurang. Target pendapatan tidak tercapai secara signifikan.<br><b>Rekomendasi:</b> Lakukan intensifikasi dan ekstensifikasi penerimaan serta evaluasi penetapan target."
+
     elif "Efisiensi" in ratio_name:
         if val > 100:
-            return "<b>Kondisi:</b> Kurang Efisien (Overbudget). Realisasi belanja melebihi pagu anggaran.<br><b>Penyebab:</b> Adanya pengeluaran tak terduga, kenaikan harga barang/jasa (inflasi), atau lemahnya kontrol pengadaan.<br><b>Dampak:</b> Melanggar aturan keuangan (jika melampaui pagu definitif), memicu defisit, dan berpotensi menimbulkan temuan audit.<br><b>Rekomendasi:</b> Segera lakukan evaluasi ulang perencanaan anggaran. Terapkan penghematan pada belanja non-prioritas. Lakukan revisi DPA (Dokumen Pelaksanaan Anggaran) jika memang diperlukan pergeseran."
+            return "<b>Kondisi:</b> Kurang Efisien (Overbudget). Realisasi belanja melebihi pagu anggaran.<br><b>Rekomendasi:</b> Evaluasi penyebab kelebihan belanja, kendalikan pengeluaran non-prioritas, dan patuhi ketentuan anggaran."
         elif val >= 90:
-            return "<b>Kondisi:</b> Sangat Efisien. Penyerapan anggaran sesuai target.<br><b>Penyebab:</b> Perencanaan dan eksekusi program berjalan sesuai jadwal.<br><b>Dampak:</b> Program kerja tercapai tepat waktu.<br><b>Rekomendasi:</b> Pastikan output program/kegiatan benar-benar dirasakan manfaatnya oleh masyarakat (Value for Money). Jangan hanya mengejar penyerapan, tapi juga kualitas hasil."
+            return "<b>Kondisi:</b> Sangat Efisien. Penyerapan anggaran sesuai target.<br><b>Rekomendasi:</b> Pastikan output dan manfaat program tetap optimal (Value for Money)."
         else:
-            return "<b>Kondisi:</b> Penyerapan Rendah. Anggaran tidak terserap maksimal.<br><b>Penyebab:</b> Keterlambatan proses pengadaan barang/jasa, program belum berjalan, atau kendala teknis di lapangan.<br><b>Dampak:</b> Target pembangunan tertunda, uang negara menganggur (idle money), dan manfaat tidak segera dirasakan masyarakat.<br><b>Rekomendasi:</b> Percepat proses tender sejak awal tahun. Lakukan monitoring dan evaluasi (Monev) berkala. Berikan sanksi administratif jika keterlambatan disebabkan oleh kelalaian OPD/Pejabat Pembuat Komitmen."
-            
+            return "<b>Kondisi:</b> Penyerapan Rendah. Anggaran tidak terserap maksimal.<br><b>Rekomendasi:</b> Percepat jadwal pelaksanaan kegiatan/pengadaan dan lakukan monitoring berkala."
+
     elif "Kemandirian" in ratio_name:
         if val >= 50:
-            return "<b>Kondisi:</b> Mandiri. PAD mendominasi struktur pendapatan.<br><b>Penyebab:</b> Basis pajak dan retribusi daerah yang kuat, serta iklim investasi yang sehat.<br><b>Dampak:</b> Tidak terlalu bergantung pada transfer pemerintah pusat. Fleksibilitas fiskal tinggi.<br><b>Rekomendasi:</b> Kembangkan BUMD dan investasi daerah untuk memperkuat struktur fiskal. Berikan insentif bagi investor yang masuk untuk menjaga keberlanjutan PAD."
+            return "<b>Kondisi:</b> Mandiri. PAD mendominasi struktur pendapatan.<br><b>Rekomendasi:</b> Jaga iklim investasi dan keberlanjutan sumber PAD."
         elif val >= 25:
-            return "<b>Kondisi:</b> Sedang. Masih cukup bergantung pada dana transfer pusat.<br><b>Penyebab:</b> Sektor unggulan daerah belum tergarap maksimal atau kepatuhan pajak masih rendah.<br><b>Dampak:</b> Rentan terhadap perubahan kebijakan fiskal pusat.<br><b>Rekomendasi:</b> Gali potensi PAD baru (pariwisata, pajak reklame, parkir). Lakukan deregulasi perizinan untuk menarik investasi swasta yang bisa meningkatkan pajak daerah."
+            return "<b>Kondisi:</b> Sedang. Masih cukup bergantung pada dana transfer.<br><b>Rekomendasi:</b> Optimalkan potensi pajak/retribusi daerah dan layanan publik."
         else:
-            return "<b>Kondisi:</b> Rendah (Sangat Tergantung Transfer).<br><b>Penyebab:</b> Basis pajak/retribusi lokal yang kecil, atau kapasitas fiskal daerah yang terbatas.<br><b>Dampak:</b> Ketergantungan tinggi pada pusat (Dana Transfer). Jika transfer terlambat, pembangunan daerah ikut terhambat.<br><b>Rekomendasi:</b> Lakukan reformasi perpajakan daerah secara menyeluruh. Ciptakan iklim investasi yang ramah (kemudahan izin) untuk merangsang aktivitas ekonomi lokal, sehingga pajak daerah meningkat secara alami."
-            
+            return "<b>Kondisi:</b> Rendah (Sangat Tergantung Transfer).<br><b>Rekomendasi:</b> Perkuat basis penerimaan lokal dan efisiensi belanja."
+
     elif "Current Ratio" in ratio_name:
         if val >= 1.5:
-            return "<b>Kondisi:</b> Likuiditas Sehat.<br><b>Penyebab:</b> Manajemen modal kerja yang baik, kas dan piutang lancar cukup untuk menutup utang jangka pendek.<br><b>Dampak:</b> Kredibilitas perusahaan di mata vendor dan bank tinggi.<br><b>Rekomendasi:</b> Jangan simpan kas terlalu banyak (idle cash). Gunakan kelebihan kas untuk ekspansi atau investasi jangka pendek yang produktif."
+            return "<b>Kondisi:</b> Likuiditas Sehat.<br><b>Rekomendasi:</b> Kelola kas surplus secara produktif dan pantau siklus modal kerja."
         else:
-            return "<b>Kondisi:</b> Risiko Likuiditas.<br><b>Penyebab:</b> Kas menipis, piutang macet, atau utang jangka pendek membengkak.<br><b>Dampak:</b> Berisiko gagal bayar (default), kehilangan kepercayaan vendor.<br><b>Rekomendasi:</b> Percepat penagihan piutang, negosiasi ulang jangka waktu utang dengan vendor, atau tambah modal kerja dari pemegang saham."
-            
+            return "<b>Kondisi:</b> Risiko Likuiditas.<br><b>Rekomendasi:</b> Percepat penagihan piutang, kelola utang jangka pendek, dan jaga arus kas operasi."
+
     elif "Debt to Equity" in ratio_name:
         if val > 2.0:
-            return "<b>Kondisi:</b> Solvabilitas Berisiko (High Leverage).<br><b>Penyebab:</b> Perusahaan terlalu agresif menggunakan utang untuk membiayai aset/ekspansi.<br><b>Dampak:</b> Beban bunga tinggi, laba tergerus, dan risiko kebangkrutan jika arus kas terganggu.<br><b>Rekomendasi:</b> Kurangi ketergantungan pada utang. Fokus pada pelunasan utang berbunga tinggi, atau cari pendanaan ekuitas (right issue)."
+            return "<b>Kondisi:</b> Solvabilitas Berisiko (High Leverage).<br><b>Rekomendasi:</b> Kendalikan beban utang dan tingkatkan porsi pendanaan internal/ekuitas."
         else:
-            return "<b>Kondisi:</b> Struktur Modal Sehat.<br><b>Penyebab:</b> Komposisi utang dan ekuitas seimbang.<br><b>Dampak:</b> Beban bunga terkendali, risiko finansial relatif rendah.<br><b>Rekomendasi:</b> Manfaatkan utang produktif (jika ada) untuk memperluas pasar, karena struktur modal saat ini masih aman untuk menanggung risiko."
-            
+            return "<b>Kondisi:</b> Struktur Modal Sehat.<br><b>Rekomendasi:</b> Pertahankan keseimbangan utang dan ekuitas."
+
     return "<b>Analisis:</b> Detail belum tersedia untuk kondisi ini."
 
-def get_cashflow_insight(nilai):
-    op = nilai.get("arus_kas_operasi", 0)
-    inv = nilai.get("arus_kas_investasi", 0)
-    fin = nilai.get("arus_kas_pendanaan", 0)
-    bersih = nilai.get("arus_kas_bersih", 0)
-    status = "Positif / Sehat" if op > 0 and bersih >= 0 else ("Perlu Perhatian" if op >= 0 else "Defisit Arus Kas Operasi")
-    return (
-        f"<b>Status Cash Flow:</b> {status}.<br>"
-        f"<b>Arus Kas Operasi:</b> {format_rupiah(op)} | <b>Investasi:</b> {format_rupiah(inv)} | <b>Pendanaan:</b> {format_rupiah(fin)}.<br>"
-        f"<b>Arus Kas Bersih (Net Cash Flow):</b> {format_rupiah(bersih)} | <b>Saldo Kas Akhir:</b> {format_rupiah(nilai.get('saldo_kas_akhir', 0))}.<br>"
-        f"<b>Rekomendasi:</b> Pastikan arus kas operasional tetap positif untuk menopang kebutuhan operasional dan investasi berkelanjutan tanpa ketergantungan berlebih pada pendanaan."
-    )
-
 # ============================================================
-# EXPORT FUNCTIONS (AUDIT)
+# EXPORT FUNCTIONS (AUDIT & CASH FLOW)
 # ============================================================
 def generate_excel(flagged_data_dict, findings_list):
     buffer = io.BytesIO()
@@ -619,6 +840,80 @@ def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data)
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
+def generate_cashflow_excel(cf_data, entity_type, filename):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        summary_rows = [
+            {"Indikator": "Entitas", "Nilai": entity_type},
+            {"Indikator": "Nama File", "Nilai": filename},
+            {"Indikator": "Total Kas Masuk (Cash Inflow)", "Nilai": cf_data["total_inflow"]},
+            {"Indikator": "Total Kas Keluar (Cash Outflow)", "Nilai": cf_data["total_outflow"]},
+            {"Indikator": "Arus Kas Bersih (Net Cash Flow)", "Nilai": cf_data["net_cf"]},
+            {"Indikator": "Saldo Kas Awal", "Nilai": cf_data["opening_cash"]},
+            {"Indikator": "Saldo Kas Akhir", "Nilai": cf_data["ending_cash"]},
+            {"Indikator": "Perubahan vs Periode Sebelumnya", "Nilai": cf_data["cf_change_vs_prev"]},
+            {"Indikator": "Arus Kas Operasi (PSAK 207)", "Nilai": cf_data["op_cf"]},
+            {"Indikator": "Arus Kas Investasi (PSAK 207)", "Nilai": cf_data["inv_cf"]},
+            {"Indikator": "Arus Kas Pendanaan (PSAK 207)", "Nilai": cf_data["fin_cf"]},
+        ]
+        pd.DataFrame(summary_rows).to_excel(writer, sheet_name="Ringkasan Cash Flow", index=False)
+
+        ratio_rows = [{"Rasio / Metrik": k, "Nilai": v} for k, v in cf_data["ratios"].items()]
+        pd.DataFrame(ratio_rows).to_excel(writer, sheet_name="Rasio Arus Kas", index=False)
+
+        if not cf_data["trend_df"].empty:
+            cf_data["trend_df"].to_excel(writer, sheet_name="Tren Arus Kas", index=False)
+
+        anom_rows = [{"Tingkat Risiko": r, "Anomali": t, "Detail": d, "Rekomendasi": rec} for r, t, d, rec in cf_data["anomalies"]]
+        pd.DataFrame(anom_rows if anom_rows else [{"Status": "Tidak ada anomali terdeteksi"}]).to_excel(writer, sheet_name="Anomali & Risiko", index=False)
+    buf.seek(0)
+    return buf
+
+def generate_cashflow_pdf(cf_data, entity_type, filename, ai_text=""):
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
+    styles = getSampleStyleSheet()
+    elements = []
+    elements.append(Paragraph("LAPORAN ANALISIS CASH FLOW - FINORA AI", styles["Heading1"]))
+    elements.append(Paragraph(f"Entitas: {entity_type} | File: {filename} | Tanggal: {datetime.now().strftime('%d %B %Y')}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    tbl_data = [
+        ["Komponen Arus Kas", "Nilai"],
+        ["Total Kas Masuk (Cash Inflow)", format_rupiah(cf_data["total_inflow"])],
+        ["Total Kas Keluar (Cash Outflow)", format_rupiah(cf_data["total_outflow"])],
+        ["Arus Kas Bersih (Net Cash Flow)", format_rupiah(cf_data["net_cf"])],
+        ["Saldo Kas Awal", format_rupiah(cf_data["opening_cash"])],
+        ["Saldo Kas Akhir", format_rupiah(cf_data["ending_cash"])],
+        ["Arus Kas Operasi", format_rupiah(cf_data["op_cf"])],
+        ["Arus Kas Investasi", format_rupiah(cf_data["inv_cf"])],
+        ["Arus Kas Pendanaan", format_rupiah(cf_data["fin_cf"])],
+    ]
+    t = Table(tbl_data, colWidths=[260, 220])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#7A1F3D")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 14))
+
+    elements.append(Paragraph("Jawaban Substantif Analisis Kas", styles["Heading2"]))
+    elements.append(Paragraph(f"1. Dari mana kas diperoleh? {cf_data['sumber_kas']}", styles["Normal"]))
+    elements.append(Paragraph(f"2. Ke mana kas digunakan? {cf_data['penggunaan_kas']}", styles["Normal"]))
+    elements.append(Paragraph(f"3. Kondisi pengelolaan kas: {cf_data['kemampuan_kelola']}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    if ai_text:
+        elements.append(Paragraph("AI Financial Insights & Rekomendasi", styles["Heading2"]))
+        clean_ai = re.sub(r"<[^>]+>", " ", ai_text)
+        elements.append(Paragraph(clean_ai[:2200], styles["Normal"]))
+
+    doc.build(elements)
+    buf.seek(0)
+    return buf
 
 # ============================================================
 # UI COMPONENTS & KKA RENDER
@@ -708,13 +1003,13 @@ def page_audit():
     if uploaded:
         df = read_uploaded_dataframe(uploaded, header_row=header_row)
         detected = auto_detect_columns(df)
-        
+
         st.markdown("### 2. Pemetaan Kolom")
         with st.expander("⚙️ Pengaturan Kolom", expanded=False):
             c1, c2 = st.columns(2)
             date_col = c1.selectbox("Kolom Tanggal", [""] + list(df.columns), index=list(df.columns).index(detected["date"])+1 if detected["date"] else 0, key="audit_col_date")
             desc_col = c2.selectbox("Kolom Deskripsi", [""] + list(df.columns), index=list(df.columns).index(detected["desc"])+1 if detected["desc"] else 0, key="audit_col_desc")
-            
+
             c3, c4, c5 = st.columns(3)
             amount_col = c3.selectbox("Kolom Nominal", [""] + list(df.columns), index=list(df.columns).index(detected["amount"])+1 if detected["amount"] else 0, key="audit_col_amt")
             budget_col = c4.selectbox("Kolom Anggaran", [""] + list(df.columns), index=list(df.columns).index(detected["budget"])+1 if detected["budget"] else 0, key="audit_col_bud")
@@ -724,7 +1019,7 @@ def page_audit():
         c_kka1, c_kka2 = st.columns(2)
         entitas = c_kka1.text_input("Nama Entitas / Perusahaan", placeholder="Contoh: PT Maju Jaya", key="audit_entitas_input")
         periode = c_kka2.text_input("Periode Audit", placeholder="Contoh: Tahun Buku 2024", key="audit_periode_input")
-        
+
         if st.button("🚀 JALANKAN PROSEDUR AUDIT", use_container_width=True):
             with st.spinner("Memproses data..."):
                 all_findings, flagged_data = [], {}
@@ -771,7 +1066,7 @@ def page_financial_analysis():
     if uploaded_fin:
         df_fin = read_uploaded_dataframe(uploaded_fin, header_row=0)
         st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis keuangan otomatis.")
-        
+
         if st.button("📊 ANALISIS KEUANGAN OTOMATIS", use_container_width=True):
             with st.spinner("Menghitung rasio..."):
                 nilai_utama = auto_extract_financials(df_fin, entity_type)
@@ -789,47 +1084,183 @@ def page_financial_analysis():
         for i, (k, v) in enumerate(rasio.items()):
             with cols[i % len(cols)]:
                 metric_card(k, f"{v}")
-        
+
         st.markdown("### 💡 Insight & Rekomendasi Rasio")
         for k, v in rasio.items():
             st.markdown(f'<div class="insight-box"><h4>{k}: {v}</h4><p>{get_detailed_insight(k, v)}</p></div>', unsafe_allow_html=True)
 
-
 def page_cash_flow():
-    finora_header("Analisis Cash Flow", "Evaluasi Arus Kas Operasi, Investasi, dan Pendanaan")
-    st.markdown("### 1. Upload Laporan Keuangan / Arus Kas")
+    finora_header("FINORA AI – Cash Flow Analysis", "Analisis substantif arus kas: sumber kas, penggunaan kas, rasio, tren, anomali & AI insight")
+    st.markdown("### 1. Upload Data Transaksi atau Laporan Arus Kas")
     c1, c2 = st.columns([2, 1])
-    uploaded_cf = c1.file_uploader("Upload File Excel/CSV/PDF", type=["xlsx", "csv", "pdf"], key="cf_menu_upload")
+    uploaded_cf = c1.file_uploader("Upload File Excel/CSV/PDF (Mutasi Kas / Laporan Arus Kas)", type=["xlsx", "csv", "pdf"], key="cf_menu_upload")
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"], key="cf_menu_entity")
+
+    c_opt1, c_opt2 = st.columns(2)
+    opening_cash_input = c_opt1.number_input("Saldo Kas Awal (Opsional / Rp)", value=0.0, step=1000000.0, key="cf_opening_cash")
+    prev_net_cf_input = c_opt2.number_input("Net Cash Flow Periode Sebelumnya (Opsional / Rp)", value=0.0, step=1000000.0, key="cf_prev_net_cf")
 
     if uploaded_cf:
         df_cf = read_uploaded_dataframe(uploaded_cf, header_row=0)
-        st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis cash flow otomatis.")
+        preview_txt = extract_text_preview(uploaded_cf, df_cf)
+        st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk menjalankan analisis cash flow substantif.")
         if st.button("💵 ANALISIS CASH FLOW OTOMATIS", use_container_width=True):
-            with st.spinner("Menghitung arus kas..."):
-                nilai = auto_extract_financials(df_cf, entity_type)
-                st.session_state["cf_menu_results"] = {"nilai": nilai, "entity_type": entity_type, "filename": uploaded_cf.name}
+            with st.spinner("Menganalisis arus kas, rasio, tren, dan anomali..."):
+                cf_data = analyze_cash_flow_substantive(
+                    df_cf,
+                    entity_type=entity_type,
+                    opening_cash=opening_cash_input,
+                    prev_net_cf=prev_net_cf_input,
+                )
+                st.session_state["cf_menu_results"] = {
+                    "cf": cf_data,
+                    "entity_type": entity_type,
+                    "filename": uploaded_cf.name,
+                    "preview_txt": preview_txt,
+                }
 
     if "cf_menu_results" in st.session_state:
         res_cf = st.session_state["cf_menu_results"]
-        nilai = res_cf["nilai"]
+        cf = res_cf["cf"]
         st.markdown("---")
-        st.markdown(f"### Hasil Analisis Cash Flow: **{res_cf['entity_type']}**")
-        cf_c1, cf_c2, cf_c3 = st.columns(3)
-        with cf_c1:
-            metric_card("Arus Kas Operasi", format_rupiah(nilai.get("arus_kas_operasi", 0)))
-        with cf_c2:
-            metric_card("Arus Kas Investasi", format_rupiah(nilai.get("arus_kas_investasi", 0)))
-        with cf_c3:
-            metric_card("Arus Kas Pendanaan", format_rupiah(nilai.get("arus_kas_pendanaan", 0)))
 
-        cf_c4, cf_c5 = st.columns(2)
-        with cf_c4:
-            metric_card("Net Cash Flow", format_rupiah(nilai.get("arus_kas_bersih", 0)))
-        with cf_c5:
-            metric_card("Saldo Kas Akhir", format_rupiah(nilai.get("saldo_kas_akhir", 0)))
+        st.markdown("### 1. Cash Flow Overview (Ringkasan Arus Kas)")
+        ov1, ov2, ov3, ov4 = st.columns(4)
+        with ov1:
+            metric_card("Total Cash Inflow", format_rupiah(cf["total_inflow"]))
+        with ov2:
+            metric_card("Total Cash Outflow", format_rupiah(cf["total_outflow"]))
+        with ov3:
+            metric_card("Net Cash Flow", format_rupiah(cf["net_cf"]))
+        with ov4:
+            metric_card("Ending Cash Balance", format_rupiah(cf["ending_cash"]))
 
-        st.markdown(f'<div class="insight-box"><h4>Analisis Cash Flow</h4><p>{get_cashflow_insight(nilai)}</p></div>', unsafe_allow_html=True)
+        ov5, ov6 = st.columns(2)
+        with ov5:
+            metric_card("Saldo Kas Awal", format_rupiah(cf["opening_cash"]))
+        with ov6:
+            pct_str = f" ({cf['cf_change_pct']:+.2f}%)" if cf["cf_change_pct"] != 0 else ""
+            metric_card("Perubahan vs Periode Lalu", f"{format_rupiah(cf['cf_change_vs_prev'])}{pct_str}")
+
+        st.markdown(f"""
+        <div class="insight-box">
+            <h4>Jawaban Substantif Pengelolaan Kas</h4>
+            <p><b>Dari mana kas diperoleh?</b> {cf['sumber_kas']}</p>
+            <p><b>Ke mana kas digunakan?</b> {cf['penggunaan_kas']}</p>
+            <p><b>Bagaimana kondisi kemampuan perusahaan dalam mengelola kasnya?</b> {cf['kemampuan_kelola']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 2. Operating, Investing & Financing Analysis (PSAK 207)")
+        act1, act2, act3 = st.columns(3)
+        with act1:
+            metric_card("Arus Kas Operasi", format_rupiah(cf["op_cf"]))
+        with act2:
+            metric_card("Arus Kas Investasi", format_rupiah(cf["inv_cf"]))
+        with act3:
+            metric_card("Arus Kas Pendanaan", format_rupiah(cf["fin_cf"]))
+
+        act_rows = pd.DataFrame([
+            {"Aktivitas (PSAK 207)": "Arus Kas Operasi (Operating)", "Nilai": format_rupiah(cf["op_cf"]), "Fokus Evaluasi": "Penerimaan pelanggan, pembayaran pemasok, gaji, pajak, dan biaya operasional inti."},
+            {"Aktivitas (PSAK 207)": "Arus Kas Investasi (Investing)", "Nilai": format_rupiah(cf["inv_cf"]), "Fokus Evaluasi": "Pembelian/penjualan aset tetap, belanja modal (CapEx), dan instrumen investasi."},
+            {"Aktivitas (PSAK 207)": "Arus Kas Pendanaan (Financing)", "Nilai": format_rupiah(cf["fin_cf"]), "Fokus Evaluasi": "Pinjaman, pembayaran utang, setoran modal, dan pembayaran dividen."},
+        ])
+        st.table(act_rows)
+
+        st.markdown("### 3. Cash Flow Ratios (Rasio Arus Kas)")
+        r_cols = st.columns(3)
+        ratio_items = list(cf["ratios"].items())
+        for idx, (r_name, r_val) in enumerate(ratio_items):
+            with r_cols[idx % 3]:
+                formatted_r = format_rupiah(r_val) if "FCF" in r_name else f"{r_val}"
+                metric_card(r_name, formatted_r)
+
+        st.markdown("""
+        <div class="insight-box">
+            <h4>Panduan Interpretasi Rasio Arus Kas</h4>
+            <p><b>Operating Cash Flow Ratio:</b> Mengukur kemampuan kas operasi membayar kewajiban jangka pendek.</p>
+            <p><b>Cash Flow to Debt Ratio:</b> Mengukur daya dukung kas operasi terhadap total liabilitas/utang.</p>
+            <p><b>Cash Flow Margin:</b> Mengukur efisiensi konversi pendapatan/penerimaan menjadi kas operasi.</p>
+            <p><b>Free Cash Flow (FCF):</b> Sisa kas setelah pengeluaran investasi/belanja modal untuk ekspansi atau pelunasan kewajiban.</p>
+            <p><b>Cash Flow Coverage:</b> Mengukur kemampuan kas operasi menutup kewajiban pokok/pendanaan.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 4. Cash Flow Trends (Tren Arus Kas)")
+        trend_df = cf["trend_df"]
+        fig_trend = None
+        if not trend_df.empty:
+            fig_trend = go.Figure()
+            fig_trend.add_trace(go.Bar(x=trend_df["Periode"], y=trend_df["Kas Masuk"], name="Kas Masuk"))
+            fig_trend.add_trace(go.Bar(x=trend_df["Periode"], y=trend_df["Kas Keluar"], name="Kas Keluar"))
+            fig_trend.add_trace(go.Scatter(x=trend_df["Periode"], y=trend_df["Saldo Kas Kumulatif"], name="Saldo Kas Kumulatif", mode="lines+markers"))
+            fig_trend.update_layout(barmode="group", title="Tren Kas Masuk, Kas Keluar, dan Saldo Kas", height=380)
+            st.plotly_chart(fig_trend, use_container_width=True)
+            st.dataframe(trend_df, use_container_width=True)
+
+        st.markdown("### 5. Anomaly & Risk Detection (Deteksi Masalah & Anomali)")
+        if cf["anomalies"]:
+            for risk_lvl, title, detail, rec in cf["anomalies"]:
+                with st.expander(f"[{risk_lvl}] {title}"):
+                    st.markdown(f"**Temuan:** {detail}")
+                    st.error(f"**Rekomendasi:** {rec}")
+        else:
+            st.success("Tidak terdeteksi anomali atau risiko kas yang signifikan pada data yang dianalisis.")
+
+        st.markdown("### 6. AI Financial Insights")
+        default_ai_summary = (
+            f"<b>Ringkasan:</b> Arus kas bersih tercatat {format_rupiah(cf['net_cf'])} dengan arus kas operasi {format_rupiah(cf['op_cf'])} "
+            f"dan saldo kas akhir {format_rupiah(cf['ending_cash'])}.<br>"
+            f"<b>Temuan Utama:</b> {cf['sumber_kas']} {cf['penggunaan_kas']}<br>"
+            f"<b>Rekomendasi:</b> {cf['kemampuan_kelola']} Lakukan pemantauan arus kas masuk/keluar secara berkala dan tindak lanjuti temuan anomali."
+        )
+        st.markdown(f'<div class="insight-box"><h4>FINORA AI – Cash Flow Insights</h4><p>{default_ai_summary}</p></div>', unsafe_allow_html=True)
+
+        if st.button("✨ Generate Analisis Naratif AI Mendalam", use_container_width=True, key="cf_ai_btn"):
+            ctx_cf = (
+                f"Entitas: {res_cf['entity_type']} | File: {res_cf['filename']}\n"
+                f"Cash Inflow: {cf['total_inflow']}, Cash Outflow: {cf['total_outflow']}, Net CF: {cf['net_cf']}, "
+                f"Saldo Awal: {cf['opening_cash']}, Saldo Akhir: {cf['ending_cash']}\n"
+                f"Operasi: {cf['op_cf']}, Investasi: {cf['inv_cf']}, Pendanaan: {cf['fin_cf']}\n"
+                f"Rasio: {cf['ratios']}\n"
+                f"Anomali: {[a[1] for a in cf['anomalies']]}\n"
+                f"Cuplikan Data: {res_cf.get('preview_txt', '')[:1000]}"
+            )
+            prompt_cf = (
+                "Susun analisis Cash Flow substantif dalam Bahasa Indonesia dengan bagian: "
+                "1) Ringkasan & Sumber/Penggunaan Kas, 2) Evaluasi Aktivitas PSAK 207 & Rasio, "
+                "3) Risiko/Anomali Utama, 4) Rekomendasi Tindak Lanjut."
+            )
+            ai_out = st.write_stream(ask_gemini_stream(prompt_cf, ctx_cf, system_role="Analis Keuangan & Auditor Cash Flow"))
+            st.session_state["cf_ai_report_text"] = ai_out
+
+        st.markdown("### 7. Export Report (Laporan & Hasil Analisis)")
+        ai_saved = st.session_state.get("cf_ai_report_text", default_ai_summary)
+        exp1, exp2, exp3 = st.columns(3)
+        with exp1:
+            cf_xlsx = generate_cashflow_excel(cf, res_cf["entity_type"], res_cf["filename"])
+            st.download_button("⬇️ Download Excel (.xlsx)", data=cf_xlsx, file_name=f"CashFlow_{res_cf['filename']}.xlsx", use_container_width=True)
+        with exp2:
+            cf_pdf = generate_cashflow_pdf(cf, res_cf["entity_type"], res_cf["filename"], ai_text=ai_saved)
+            st.download_button("⬇️ Download PDF (.pdf)", data=cf_pdf, file_name=f"CashFlow_{res_cf['filename']}.pdf", use_container_width=True)
+        with exp3:
+            ai_report_txt = (
+                f"LAPORAN AI CASH FLOW - {res_cf['entity_type']} ({res_cf['filename']})\n"
+                f"Tanggal: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Sumber Kas: {cf['sumber_kas']}\n"
+                f"Penggunaan Kas: {cf['penggunaan_kas']}\n"
+                f"Kemampuan Pengelolaan Kas: {cf['kemampuan_kelola']}\n\n"
+                f"{re.sub(r'<[^>]+>', ' ', ai_saved)}"
+            )
+            st.download_button("⬇️ Download AI Report (.txt)", data=ai_report_txt.encode("utf-8"), file_name=f"AI_CashFlow_Report_{res_cf['filename']}.txt", use_container_width=True)
+
+        if fig_trend is not None:
+            st.markdown("#### Unduh Grafik Tren Arus Kas")
+            try:
+                png_bytes = fig_trend.to_image(format="png", scale=2)
+                st.download_button("⬇️ Download Grafik Tren (.png)", data=png_bytes, file_name=f"Grafik_CashFlow_{res_cf['filename']}.png", use_container_width=True)
+            except Exception:
+                st.caption("Tip: Install `kaleido` (`pip install kaleido`) untuk mengunduh grafik langsung dalam format PNG.")
 
 def page_dashboard():
     finora_header("Dashboard", "Ringkasan seluruh aktivitas FINORA AI")
@@ -885,7 +1316,7 @@ def page_landing():
         </p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     col_cta1, col_cta2, col_cta3 = st.columns([1, 2, 1])
     with col_cta2:
         if st.button("🚀 MASUK KE APLIKASI UTAMA", use_container_width=True):
@@ -903,10 +1334,10 @@ def main():
         page_landing()
     else:
         menu = st.sidebar.selectbox(
-            "Pilih Menu Utama", 
+            "Pilih Menu Utama",
             ["Dashboard", "Audit Profesional", "Analisis Laporan Keuangan", "Analisis Cash Flow", "Pusat Laporan & Arsip", "Kembali ke Beranda"]
         )
-        
+
         if menu == "Dashboard":
             page_dashboard()
         elif menu == "Audit Profesional":
