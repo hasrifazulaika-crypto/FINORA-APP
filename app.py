@@ -275,31 +275,85 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
     elif name.endswith(".pdf"):
         raw_bytes = uploaded_file.getvalue()
         text_lines = []
+
+        # 1. Ekstrak tabel & teks dengan pdfplumber jika tersedia
         try:
-            import pypdf
-            reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
-            for page in reader.pages:
-                t = page.extract_text() or ""
-                for line in t.splitlines():
-                    clean_l = re.sub(r"\s+", " ", line).strip()
-                    if clean_l:
-                        text_lines.append(clean_l)
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
+                for page in pdf.pages:
+                    tables = page.extract_tables() or []
+                    for tbl in tables:
+                        for row in tbl:
+                            if row:
+                                clean_row = " | ".join(
+                                    re.sub(r"\s+", " ", str(cell or "")).strip()
+                                    for cell in row
+                                    if str(cell or "").strip()
+                                )
+                                if clean_row:
+                                    text_lines.append(clean_row)
+                    page_txt = page.extract_text() or ""
+                    for line in page_txt.splitlines():
+                        clean_l = re.sub(r"\s+", " ", line).strip()
+                        if clean_l:
+                            text_lines.append(clean_l)
         except Exception:
             pass
 
-        num_token_re = re.compile(r"\(?-?\d{1,3}(?:\.\d{3})+(?:,\d{2})?\)?|\(?-?\d+,\d{2}\)?")
+        # 2. Fallback ke pypdf jika text_lines masih kosong
+        if not text_lines:
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
+                for page in reader.pages:
+                    t = page.extract_text() or ""
+                    for line in t.splitlines():
+                        clean_l = re.sub(r"\s+", " ", line).strip()
+                        if clean_l:
+                            text_lines.append(clean_l)
+            except Exception:
+                pass
+
+        # 3. Fallback OCR jika PDF berupa gambar / scan
+        if not text_lines:
+            try:
+                import pypdfium2 as pdfium
+                import pytesseract
+                pdf_doc = pdfium.PdfDocument(raw_bytes)
+                for i in range(len(pdf_doc)):
+                    pil_img = pdf_doc[i].render(scale=2.0).to_pil()
+                    ocr_txt = pytesseract.image_to_string(pil_img, lang="ind+eng") or ""
+                    for line in ocr_txt.splitlines():
+                        clean_l = re.sub(r"\s+", " ", line).strip()
+                        if clean_l:
+                            text_lines.append(clean_l)
+            except Exception:
+                pass
+
+        dedup_lines = []
+        for l in text_lines:
+            if not dedup_lines or dedup_lines[-1] != l:
+                dedup_lines.append(l)
+
+        num_token_re = re.compile(
+            r"\(?-?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?\)?|\(?-?\d+(?:[.,]\d{1,2})?\)?"
+        )
         pending_uraian = []
         rows = []
 
-        for line in text_lines:
-            if re.fullmatch(r"[\d\s|]+", line):
+        for line in dedup_lines:
+            if re.fullmatch(r"[\d\s|.-]+", line):
                 continue
             low_l = line.lower()
             if "tahun 2024" in low_l and "tahun 2023" in low_l:
                 continue
 
             matches = [m.group(0) for m in num_token_re.finditer(line)]
-            parsed_vals = [v for tok in matches if (v := _parse_indo_number(tok)) is not None]
+            parsed_vals = []
+            for tok in matches:
+                v = _parse_indo_number(tok)
+                if v is not None:
+                    parsed_vals.append(v)
 
             uraian_part = num_token_re.sub(" ", line)
             uraian_part = re.sub(r"\b\d+(?:\.\d+){1,4}\b", " ", uraian_part)
@@ -321,6 +375,15 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
                     "Tahun 2024": val_2024,
                     "Tahun 2023": val_2023,
                     "Nominal": val_2024,
+                })
+
+        if not rows and dedup_lines:
+            for l in dedup_lines[:30]:
+                rows.append({
+                    "Uraian": l,
+                    "Tahun 2024": 0.0,
+                    "Tahun 2023": 0.0,
+                    "Nominal": 0.0,
                 })
 
         if not rows:
