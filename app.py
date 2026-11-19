@@ -23,7 +23,6 @@ from reportlab.lib import colors
 # ============================================================
 LOGO_FILENAME = "logo.png"
 
-# Fungsi untuk mengonversi gambar logo ke Base64 agar bisa tampil di HTML
 def get_base64_image(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
@@ -49,7 +48,6 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 .finora-header { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%); color: white; padding: 24px; border-radius: 16px; margin-bottom: 20px; }
 .finora-header h1 { color: white; margin: 0; font-size: 30px; display: flex; align-items: center; }
 .finora-header p  { color: #FFF0F4; margin: 6px 0 0 0; }
-/* CSS Khusus Kartu Metrik Kustom */
 .metric-card {
     background: white;
     padding: 16px;
@@ -60,7 +58,6 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 }
 .metric-card p { color: #555; font-size: 14px; margin: 0; font-weight: 600; }
 .metric-card h3 { color: #7A1F3D; margin: 5px 0 0 0; font-size: 24px; font-weight: 700; }
-/* CSS Kotak Analisis */
 .insight-box {
     background-color: white;
     padding: 20px;
@@ -227,6 +224,48 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
     except Exception as e:
         yield f"\n\n⚠️ Terjadi kesalahan: {str(e)}"
 
+def _parse_indo_number(token):
+    if token is None or (isinstance(token, float) and np.isnan(token)):
+        return None
+    if isinstance(token, (int, float, np.number)):
+        return float(token)
+    s = str(token).strip()
+    if not s or s in {"-", "—", "n/a", "na", "null", "none"}:
+        return None
+    neg = False
+    if s.startswith("(") and s.endswith(")"):
+        neg = True
+        s = s[1:-1].strip()
+    if s.startswith("-"):
+        neg = True
+        s = s[1:].strip()
+    s = re.sub(r"(?i)\b(rp|idr|jt|juta|m|miliar|t|triliun)\b", "", s).strip()
+    s = re.sub(r"[^0-9.,]", "", s)
+    if not s or not any(ch.isdigit() for ch in s):
+        return None
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        parts = s.split(",")
+        if len(parts[-1]) == 2:
+            s = "".join(parts[:-1]) + "." + parts[-1]
+        elif len(parts[-1]) == 3 and all(p.isdigit() for p in parts):
+            s = "".join(parts)
+        else:
+            s = s.replace(",", ".")
+    elif "." in s:
+        parts = s.split(".")
+        if len(parts[-1]) == 3 and all(p.isdigit() for p in parts):
+            s = "".join(parts)
+    try:
+        val = float(s)
+        return -val if neg else val
+    except ValueError:
+        return None
+
 def read_uploaded_dataframe(uploaded_file, header_row=0):
     name = uploaded_file.name.lower()
     if name.endswith(".xlsx"):
@@ -242,33 +281,52 @@ def read_uploaded_dataframe(uploaded_file, header_row=0):
             for page in reader.pages:
                 t = page.extract_text() or ""
                 for line in t.splitlines():
-                    if line.strip():
-                        text_lines.append(line.strip())
+                    clean_l = re.sub(r"\s+", " ", line).strip()
+                    if clean_l:
+                        text_lines.append(clean_l)
         except Exception:
             pass
-        if not text_lines:
-            try:
-                decoded = raw_bytes.decode("latin-1", errors="ignore")
-                for part in decoded.split("BT"):
-                    clean_part = "".join(ch if 32 <= ord(ch) <= 126 else " " for ch in part).strip()
-                    if len(clean_part) > 3:
-                        text_lines.append(clean_part)
-            except Exception:
-                pass
+
+        num_token_re = re.compile(r"\(?-?\d{1,3}(?:\.\d{3})+(?:,\d{2})?\)?|\(?-?\d+,\d{2}\)?")
+        pending_uraian = []
         rows = []
+
         for line in text_lines:
-            nums = re.findall(r'-?\d[\d.,]*', line)
-            nominal = 0.0
-            if nums:
-                raw_num = nums[-1].replace(".", "").replace(",", ".")
-                try:
-                    nominal = float(raw_num)
-                except ValueError:
-                    nominal = 0.0
-            rows.append({"Uraian": line, "Nominal": nominal})
+            if re.fullmatch(r"[\d\s|]+", line):
+                continue
+            low_l = line.lower()
+            if "tahun 2024" in low_l and "tahun 2023" in low_l:
+                continue
+
+            matches = [m.group(0) for m in num_token_re.finditer(line)]
+            parsed_vals = [v for tok in matches if (v := _parse_indo_number(tok)) is not None]
+
+            uraian_part = num_token_re.sub(" ", line)
+            uraian_part = re.sub(r"\b\d+(?:\.\d+){1,4}\b", " ", uraian_part)
+            uraian_part = re.sub(r"\s+", " ", uraian_part).strip(" |-")
+
+            if uraian_part and not parsed_vals:
+                pending_uraian.append(uraian_part)
+                continue
+
+            if parsed_vals:
+                full_uraian = " ".join(pending_uraian + ([uraian_part] if uraian_part else [])).strip()
+                pending_uraian = []
+
+                val_2024 = parsed_vals[0] if len(parsed_vals) >= 1 else 0.0
+                val_2023 = parsed_vals[1] if len(parsed_vals) >= 2 else 0.0
+
+                rows.append({
+                    "Uraian": full_uraian if full_uraian else line,
+                    "Tahun 2024": val_2024,
+                    "Tahun 2023": val_2023,
+                    "Nominal": val_2024,
+                })
+
         if not rows:
-            rows = [{"Uraian": "PDF kosong / tidak terbaca", "Nominal": 0.0}]
+            rows = [{"Uraian": "PDF kosong / tidak terbaca", "Tahun 2024": 0.0, "Tahun 2023": 0.0, "Nominal": 0.0}]
         return pd.DataFrame(rows)
+
     return pd.read_csv(uploaded_file, header=header_row)
 
 def extract_text_preview(uploaded_file, df):
@@ -387,52 +445,14 @@ def audit_outliers_iqr(df, amount_col):
     return findings, flagged
 
 # ============================================================
-# SMART FINANCIAL ENGINE (+ CASH FLOW SUBSTANTIF)
+# SMART FINANCIAL ENGINE (+ CASH FLOW SUBSTANTIF & 2 TAHUN)
 # ============================================================
 def _parse_num_series(series):
     if pd.api.types.is_numeric_dtype(series):
         return pd.to_numeric(series, errors="coerce").fillna(0.0)
-    def _conv(v):
-        if pd.isna(v):
-            return 0.0
-        if isinstance(v, (int, float, np.number)):
-            return float(v)
-        s = str(v).strip()
-        if not s or s in {"-", "—", "n/a", "na", "null", "none"}:
-            return 0.0
-        neg = False
-        if s.startswith("(") and s.endswith(")"):
-            neg = True
-            s = s[1:-1].strip()
-        if s.startswith("-"):
-            neg = True
-            s = s[1:].strip()
-        s = re.sub(r"(?i)\b(rp|idr|jt|juta|m|miliar|t|triliun)\b", "", s).strip()
-        s = s.replace(" ", "")
-        if "," in s and "." in s:
-            if s.rfind(",") > s.rfind("."):
-                s = s.replace(".", "").replace(",", ".")
-            else:
-                s = s.replace(",", "")
-        elif "." in s:
-            parts = s.split(".")
-            if len(parts[-1]) == 3 and all(p.isdigit() for p in parts):
-                s = "".join(parts)
-        elif "," in s:
-            parts = s.split(",")
-            if len(parts[-1]) == 3 and all(p.isdigit() for p in parts):
-                s = "".join(parts)
-            else:
-                s = s.replace(",", ".")
-        s = re.sub(r"[^0-9.]", "", s)
-        try:
-            val = float(s) if s else 0.0
-            return -val if neg else val
-        except ValueError:
-            return 0.0
-    return series.map(_conv).fillna(0.0)
+    return series.map(lambda v: _parse_indo_number(v) or 0.0).fillna(0.0)
 
-def auto_extract_financials(df, entity_type):
+def auto_extract_financials(df, entity_type, target_year="2024"):
     results = {
         "pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0,
         "total_aset": 0.0, "total_liabilitas": 0.0, "ekuitas": 0.0,
@@ -440,7 +460,8 @@ def auto_extract_financials(df, entity_type):
         "real_belanja": 0.0, "ang_belanja": 0.0,
         "surplus": 0.0, "pad": 0.0,
         "arus_kas_operasi": 0.0, "arus_kas_investasi": 0.0, "arus_kas_pendanaan": 0.0,
-        "arus_kas_bersih": 0.0, "saldo_kas_awal": 0.0, "saldo_kas_akhir": 0.0
+        "arus_kas_bersih": 0.0, "saldo_kas_awal": 0.0, "saldo_kas_akhir": 0.0,
+        "prev_arus_kas_bersih": 0.0
     }
     if df is None or df.empty:
         return results
@@ -449,7 +470,7 @@ def auto_extract_financials(df, entity_type):
     str_cols = []
     for col in df.columns:
         c_low = str(col).lower().strip()
-        if any(k in c_low for k in ["tanggal", "tgl", "date", "waktu", "kode", "no.", "nomor", "tahun", "periode", "bulan"]):
+        if any(k in c_low for k in ["tanggal", "tgl", "date", "waktu", "kode", "no.", "nomor", "periode", "bulan"]):
             if df[col].dtype == object or str(df[col].dtype).startswith("string"):
                 str_cols.append(col)
             continue
@@ -481,23 +502,30 @@ def auto_extract_financials(df, entity_type):
             best_name_col = sc
 
     real_col, real_series = None, None
-    ang_col, ang_series = None, None
+    comp_col, comp_series = None, None
+
+    target_str = str(target_year).strip()
+    other_year = "2023" if target_str == "2024" else "2024"
+
     for col, s_p in parsed_num_cols:
-        c_str = str(col).lower()
-        if any(k in c_str for k in ["realisasi", "real", "aktual", "actual", "jumlah", "nominal", "nilai", "saldo", "total"]):
-            if real_col is None:
+        if target_str and target_str in str(col).lower():
+            real_col, real_series = col, s_p
+            break
+
+    if real_series is None:
+        for col, s_p in parsed_num_cols:
+            c_str = str(col).lower()
+            if any(k in c_str for k in ["realisasi", "real", "aktual", "actual", "jumlah", "nominal", "nilai", "saldo", "total"]):
                 real_col, real_series = col, s_p
-        elif any(k in c_str for k in ["anggaran", "ang", "pagu", "budget", "target"]):
-            if ang_col is None:
-                ang_col, ang_series = col, s_p
+                break
 
     if real_series is None:
         real_col, real_series = parsed_num_cols[0]
-    if ang_series is None and len(parsed_num_cols) > 1:
-        for col, s_p in parsed_num_cols:
-            if col != real_col:
-                ang_col, ang_series = col, s_p
-                break
+
+    for col, s_p in parsed_num_cols:
+        if col != real_col and (other_year in str(col).lower() or "lalu" in str(col).lower() or "anggaran" in str(col).lower() or "pagu" in str(col).lower()):
+            comp_col, comp_series = col, s_p
+            break
 
     clean_names = df[best_name_col].astype(str).str.lower().str.replace(r"[^a-z0-9\s]", " ", regex=True).str.replace(r"\s+", " ", regex=True).str.strip()
 
@@ -517,60 +545,73 @@ def auto_extract_financials(df, entity_type):
 
     ak_op = get_from_series(
         real_series,
-        ["arus kas dari aktivitas operasi", "aktivitas operasi", "arus kas operasi", "kas bersih dari aktivitas operasi"],
-        ["arus kas operasi", "aktivitas operasi", "kas dari operasi", "aktivitas operasional", "penerimaan kas dari operasi", "pengeluaran kas operasi"]
+        ["arus kas bersih dari aktivitas operasi", "arus kas dari aktivitas operasi", "aktivitas operasi", "arus kas operasi", "kas bersih dari aktivitas operasi"],
+        ["arus kas bersih dari aktivitas operasi", "arus kas operasi", "aktivitas operasi", "kas dari operasi", "aktivitas operasional"]
     )
     ak_inv = get_from_series(
         real_series,
-        ["arus kas dari aktivitas investasi", "aktivitas investasi", "arus kas investasi", "kas bersih dari aktivitas investasi"],
-        ["arus kas investasi", "aktivitas investasi", "kas dari investasi", "investasi nonaset", "investasi aset tetap"]
+        ["arus kas bersih dari aktivitas investasi", "arus kas dari aktivitas investasi", "aktivitas investasi", "arus kas investasi", "kas bersih dari aktivitas investasi"],
+        ["arus kas bersih dari aktivitas investasi", "arus kas investasi", "aktivitas investasi", "kas dari investasi", "investasi aset tetap"]
     )
     ak_fin = get_from_series(
         real_series,
-        ["arus kas dari aktivitas pendanaan", "aktivitas pendanaan", "arus kas pendanaan", "arus kas dari aktivitas pembiayaan", "aktivitas pembiayaan", "pembiayaan netto"],
-        ["arus kas pendanaan", "aktivitas pendanaan", "kas dari pendanaan", "aktivitas pembiayaan", "pembiayaan netto", "penerimaan pembiayaan", "pengeluaran pembiayaan"]
+        ["arus kas bersih dari aktivitas pendanaan", "arus kas dari aktivitas pendanaan", "aktivitas pendanaan", "arus kas pendanaan", "arus kas dari aktivitas pembiayaan", "aktivitas pembiayaan", "pembiayaan netto"],
+        ["arus kas bersih dari aktivitas pendanaan", "arus kas pendanaan", "aktivitas pendanaan", "kas dari pendanaan", "aktivitas pembiayaan", "pembiayaan netto"]
     )
     kas_akhir = get_from_series(
         real_series,
-        ["saldo kas akhir", "kas akhir periode", "kas dan setara kas akhir", "saldo kas di kas daerah akhir", "kas di kas daerah"],
-        ["saldo kas akhir", "kas akhir", "kas dan setara kas akhir", "saldo akhir kas"]
+        ["saldo akhir kas", "saldo kas akhir", "kas akhir periode", "kas dan setara kas akhir", "saldo kas di kas daerah akhir"],
+        ["saldo akhir kas", "saldo kas akhir", "kas akhir", "kas dan setara kas akhir"]
     )
     kas_awal = get_from_series(
         real_series,
-        ["saldo kas awal", "kas awal periode", "kas dan setara kas awal", "saldo kas di kas daerah awal"],
-        ["saldo kas awal", "kas awal", "kas dan setara kas awal", "saldo awal kas"]
+        ["saldo awal kas", "saldo kas awal", "kas awal periode", "kas dan setara kas awal", "saldo kas di kas daerah awal"],
+        ["saldo awal kas", "saldo kas awal", "kas awal", "kas dan setara kas awal"]
     )
+
+    prev_net_cf_extracted = 0.0
+    if comp_series is not None:
+        prev_net_cf_extracted = get_from_series(
+            comp_series,
+            ["kenaikan penurunan kas", "kenaikan bersih kas", "arus kas bersih"],
+            ["kenaikan penurunan kas", "kenaikan bersih kas", "arus kas bersih"]
+        )
+        if prev_net_cf_extracted == 0.0:
+            p_op = get_from_series(comp_series, ["arus kas bersih dari aktivitas operasi"], ["arus kas bersih dari aktivitas operasi", "arus kas operasi"])
+            p_inv = get_from_series(comp_series, ["arus kas bersih dari aktivitas investasi"], ["arus kas bersih dari aktivitas investasi", "arus kas investasi"])
+            p_fin = get_from_series(comp_series, ["arus kas bersih dari aktivitas pendanaan"], ["arus kas bersih dari aktivitas pendanaan", "arus kas pendanaan"])
+            prev_net_cf_extracted = p_op + p_inv + p_fin
 
     if "Pemerintahan" in entity_type:
         real_p = get_from_series(
             real_series,
-            ["total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan lra", "jumlah pendapatan daerah", "total pendapatan daerah"],
-            ["total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan asli daerah", "pad", "dana perimbangan", "dana transfer", "pendapatan transfer", "lain lain pendapatan"]
+            ["jumlah arus kas masuk", "total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan lra"],
+            ["jumlah arus kas masuk", "total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan asli daerah", "pad", "dana perimbangan", "dana transfer"]
         )
         ang_p = get_from_series(
-            ang_series,
-            ["total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan lra"],
-            ["total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan asli daerah", "pad", "dana perimbangan", "dana transfer"]
+            comp_series,
+            ["jumlah arus kas masuk", "total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan lra"],
+            ["jumlah arus kas masuk", "total pendapatan", "jumlah pendapatan", "pendapatan daerah", "pendapatan asli daerah", "pad"]
         )
-        real_b = get_from_series(
+        real_b = abs(get_from_series(
             real_series,
-            ["total belanja", "jumlah belanja", "belanja daerah", "belanja lra", "jumlah belanja daerah", "total belanja daerah"],
-            ["total belanja", "jumlah belanja", "belanja daerah", "belanja operasi", "belanja pegawai", "belanja barang dan jasa", "belanja modal", "belanja tak terduga", "belanja transfer"]
-        )
-        ang_b = get_from_series(
-            ang_series,
-            ["total belanja", "jumlah belanja", "belanja daerah", "belanja lra"],
-            ["total belanja", "jumlah belanja", "belanja daerah", "belanja operasi", "belanja modal", "belanja tak terduga", "belanja transfer"]
-        )
+            ["jumlah arus kas keluar", "total belanja", "jumlah belanja", "belanja daerah", "belanja lra"],
+            ["jumlah arus kas keluar", "total belanja", "jumlah belanja", "belanja daerah", "belanja operasi", "belanja modal", "belanja transfer"]
+        ))
+        ang_b = abs(get_from_series(
+            comp_series,
+            ["jumlah arus kas keluar", "total belanja", "jumlah belanja", "belanja daerah", "belanja lra"],
+            ["jumlah arus kas keluar", "total belanja", "jumlah belanja", "belanja daerah", "belanja operasi", "belanja modal"]
+        ))
         pad = get_from_series(
             real_series,
             ["pendapatan asli daerah", "jumlah pendapatan asli daerah", "total pendapatan asli daerah", "pad"],
-            ["pendapatan asli daerah", "pajak daerah", "retribusi daerah", "hasil pengelolaan kekayaan daerah"]
+            ["pendapatan asli daerah", "penerimaan pajak daerah", "penerimaan retribusi daerah", "pajak daerah", "retribusi daerah"]
         )
         belanja_modal = abs(get_from_series(
             real_series,
             ["belanja modal", "jumlah belanja modal", "total belanja modal"],
-            ["belanja modal"]
+            ["belanja modal", "perolehan tanah", "perolehan peralatan", "perolehan gedung", "perolehan jalan"]
         ))
         pembiayaan_netto = get_from_series(
             real_series,
@@ -612,7 +653,8 @@ def auto_extract_financials(df, entity_type):
             "real_belanja": real_b, "ang_belanja": ang_b,
             "pad": pad, "surplus": surplus,
             "arus_kas_operasi": ak_op, "arus_kas_investasi": ak_inv, "arus_kas_pendanaan": ak_fin,
-            "arus_kas_bersih": ak_bersih, "saldo_kas_awal": kas_awal, "saldo_kas_akhir": kas_akhir
+            "arus_kas_bersih": ak_bersih, "saldo_kas_awal": kas_awal, "saldo_kas_akhir": kas_akhir,
+            "prev_arus_kas_bersih": prev_net_cf_extracted
         })
     else:
         rev = get_from_series(real_series, ["total pendapatan", "pendapatan", "total penjualan", "penjualan"], ["pendapatan", "penjualan", "revenue"])
@@ -646,13 +688,18 @@ def auto_extract_financials(df, entity_type):
         results["arus_kas_bersih"] = ak_bersih
         results["saldo_kas_awal"] = kas_awal
         results["saldo_kas_akhir"] = kas_akhir
+        results["prev_arus_kas_bersih"] = prev_net_cf_extracted
 
     return results
 
-def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", opening_cash=0.0, prev_net_cf=0.0):
+def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", opening_cash=0.0, prev_net_cf=0.0, target_year="2024"):
     is_gov = "Pemerintahan" in entity_type
     entity_label = "entitas/instansi pemerintah" if is_gov else "perusahaan"
-    base = auto_extract_financials(df, entity_type)
+    base = auto_extract_financials(df, entity_type, target_year=target_year)
+
+    if prev_net_cf == 0.0 and float(base.get("prev_arus_kas_bersih", 0.0)) != 0.0:
+        prev_net_cf = float(base.get("prev_arus_kas_bersih", 0.0))
+
     cols_lower = {str(c).lower().strip(): c for c in df.columns}
 
     def find_col(keywords):
@@ -662,12 +709,12 @@ def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", ope
                     return orig
         return None
 
-    date_col = find_col(["tanggal", "tgl", "date", "periode", "bulan", "tahun"])
+    date_col = find_col(["tanggal", "tgl", "date", "periode", "bulan"])
     desc_col = find_col(["uraian", "keterangan", "deskripsi", "transaksi", "nama", "akun", "program", "kegiatan"])
     cat_col = find_col(["kategori", "category", "aktivitas", "jenis", "tipe", "kelompok", "pos"])
     inflow_col = find_col(["kas masuk", "cash inflow", "inflow", "penerimaan", "debit", "masuk"])
     outflow_col = find_col(["kas keluar", "cash outflow", "outflow", "pengeluaran", "kredit", "keluar"])
-    amt_col = find_col(["realisasi", "nominal", "jumlah", "nilai", "amount", "saldo"])
+    amt_col = find_col([f"tahun {target_year}", target_year, "realisasi", "nominal", "jumlah", "nilai", "amount", "saldo"])
 
     is_ledger = (inflow_col is not None) or (outflow_col is not None)
 
@@ -725,19 +772,18 @@ def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", ope
 
     rekon_diff = 0.0
     extracted_opening = float(base.get("saldo_kas_awal", 0.0))
+    reported_end = float(base.get("saldo_kas_akhir", 0.0))
+
     if opening_cash != 0.0:
         ending_cash = float(opening_cash) + net_cf
-        reported_end = float(base.get("saldo_kas_akhir", 0.0))
         if reported_end != 0.0 and not is_ledger:
             rekon_diff = ending_cash - reported_end
     elif extracted_opening != 0.0:
         opening_cash = extracted_opening
         ending_cash = opening_cash + net_cf
-        reported_end = float(base.get("saldo_kas_akhir", 0.0))
         if reported_end != 0.0 and not is_ledger:
             rekon_diff = ending_cash - reported_end
     else:
-        reported_end = float(base.get("saldo_kas_akhir", 0.0))
         if reported_end != 0.0 and not is_ledger:
             ending_cash = reported_end
             opening_cash = ending_cash - net_cf
@@ -748,7 +794,6 @@ def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", ope
     cf_change_vs_prev = net_cf - float(prev_net_cf)
     cf_change_pct = round((cf_change_vs_prev / abs(prev_net_cf)) * 100, 2) if prev_net_cf != 0 else 0.0
 
-    # Perhitungan pembagi rasio dengan fallback wajar bila data Neraca/Utang tidak ada di file
     raw_curr_liab = float(base.get("liabilitas_lancar", 0.0))
     raw_total_debt = float(base.get("total_liabilitas", 0.0))
 
@@ -807,12 +852,20 @@ def analyze_cash_flow_substantive(df, entity_type="Perusahaan Swasta / Tbk", ope
             trend_df["Saldo Kas Kumulatif"] = float(opening_cash) + trend_df["Net Cash Flow"].cumsum()
 
     if trend_df.empty:
+        has_2023 = "Tahun 2023" in df.columns
+        prev_label = "Tahun 2023" if has_2023 else "Periode Lalu"
+        curr_label = f"Tahun {target_year}" if f"Tahun {target_year}" in df.columns else "Periode Berjalan"
+        prev_base = auto_extract_financials(df, entity_type, target_year="2023") if has_2023 else {}
+        prev_inflow = float(prev_base.get("real_pendapatan", 0.0)) if has_2023 else max(0.0, float(prev_net_cf) + total_outflow * 0.8)
+        prev_outflow = float(prev_base.get("real_belanja", 0.0)) if has_2023 else max(0.0, total_outflow * 0.85)
+        prev_end_cash = float(prev_base.get("saldo_kas_akhir", opening_cash)) if has_2023 else float(opening_cash)
+
         trend_df = pd.DataFrame({
-            "Periode": ["Periode Lalu", "Periode Berjalan"],
-            "Kas Masuk": [max(0.0, float(prev_net_cf) + total_outflow * 0.8), total_inflow],
-            "Kas Keluar": [max(0.0, total_outflow * 0.85), total_outflow],
+            "Periode": [prev_label, curr_label],
+            "Kas Masuk": [prev_inflow, total_inflow],
+            "Kas Keluar": [prev_outflow, total_outflow],
             "Net Cash Flow": [float(prev_net_cf), net_cf],
-            "Saldo Kas Kumulatif": [float(opening_cash), float(ending_cash)]
+            "Saldo Kas Kumulatif": [prev_end_cash, float(ending_cash)]
         })
 
     anomalies = []
@@ -1253,27 +1306,30 @@ def page_audit():
 def page_financial_analysis():
     finora_header("Analisis Laporan Keuangan", "Evaluasi Kesehatan Finansial Otomatis")
     st.markdown("### 1. Upload Laporan Keuangan")
-    c1, c2 = st.columns([2, 1])
+    c1, c2, c3 = st.columns([2, 1, 1])
     uploaded_fin = c1.file_uploader("Upload File Excel/CSV/PDF (APBD / Neraca / Laba Rugi)", type=["xlsx", "csv", "pdf"], key="fin_upload_unique")
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"], key="fin_entity_unique")
+    target_year = c3.selectbox("Periode / Tahun Acuan", ["2024", "2023"], key="fin_year_unique")
 
     if uploaded_fin:
         df_fin = read_uploaded_dataframe(uploaded_fin, header_row=0)
         st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk analisis keuangan otomatis.")
+        with st.expander("📄 Pratinjau Data Terbaca", expanded=False):
+            st.dataframe(df_fin.head(25), use_container_width=True)
 
         if st.button("📊 ANALISIS KEUANGAN OTOMATIS", use_container_width=True):
             with st.spinner("Menghitung rasio..."):
-                nilai_utama = auto_extract_financials(df_fin, entity_type)
+                nilai_utama = auto_extract_financials(df_fin, entity_type, target_year=target_year)
                 rasio = hitung_rasio_dari_nilai(nilai_utama, entity_type)
                 st.session_state['fin_results'] = {
-                    "rasio": rasio, "nilai": nilai_utama, "entity_type": entity_type, "filename": uploaded_fin.name
+                    "rasio": rasio, "nilai": nilai_utama, "entity_type": entity_type, "filename": uploaded_fin.name, "target_year": target_year
                 }
 
     if 'fin_results' in st.session_state:
         res = st.session_state['fin_results']
         rasio, nilai = res["rasio"], res["nilai"]
         st.markdown("---")
-        st.markdown(f"### Hasil Analisis: **{res['entity_type']}**")
+        st.markdown(f"### Hasil Analisis: **{res['entity_type']}** (Tahun {res.get('target_year', '2024')})")
         cols = st.columns(len(rasio) if len(rasio) > 0 else 1)
         for i, (k, v) in enumerate(rasio.items()):
             with cols[i % len(cols)]:
@@ -1286,18 +1342,22 @@ def page_financial_analysis():
 def page_cash_flow():
     finora_header("FINORA AI – Cash Flow Analysis", "Analisis substantif arus kas: sumber kas, penggunaan kas, rasio, tren, anomali & AI insight")
     st.markdown("### 1. Upload Data Transaksi atau Laporan Arus Kas")
-    c1, c2 = st.columns([2, 1])
+    c1, c2, c3 = st.columns([2, 1, 1])
     uploaded_cf = c1.file_uploader("Upload File Excel/CSV/PDF (Mutasi Kas / LRA / LAK / Laporan Arus Kas)", type=["xlsx", "csv", "pdf"], key="cf_menu_upload")
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"], key="cf_menu_entity")
+    target_year = c3.selectbox("Tahun Analisis", ["2024", "2023"], key="cf_menu_year")
 
     c_opt1, c_opt2 = st.columns(2)
-    opening_cash_input = c_opt1.number_input("Saldo Kas Awal (Opsional / Rp)", value=0.0, step=1000000.0, key="cf_opening_cash")
-    prev_net_cf_input = c_opt2.number_input("Net Cash Flow Periode Sebelumnya (Opsional / Rp)", value=0.0, step=1000000.0, key="cf_prev_net_cf")
+    opening_cash_input = c_opt1.number_input("Saldo Kas Awal (Opsional / Rp — 0 untuk baca otomatis dari file)", value=0.0, step=1000000.0, key="cf_opening_cash")
+    prev_net_cf_input = c_opt2.number_input("Net Cash Flow Periode Sebelumnya (Opsional / Rp — 0 untuk baca otomatis)", value=0.0, step=1000000.0, key="cf_prev_net_cf")
 
     if uploaded_cf:
         df_cf = read_uploaded_dataframe(uploaded_cf, header_row=0)
         preview_txt = extract_text_preview(uploaded_cf, df_cf)
         st.success("✨ File berhasil dibaca. Klik tombol di bawah untuk menjalankan analisis cash flow substantif.")
+        with st.expander("📄 Pratinjau Baris Terbaca (Termasuk 2 Kolom Tahun jika PDF)", expanded=False):
+            st.dataframe(df_cf.head(30), use_container_width=True)
+
         if st.button("💵 ANALISIS CASH FLOW OTOMATIS", use_container_width=True):
             with st.spinner("Menganalisis arus kas, rasio, tren, dan anomali..."):
                 cf_data = analyze_cash_flow_substantive(
@@ -1305,12 +1365,14 @@ def page_cash_flow():
                     entity_type=entity_type,
                     opening_cash=opening_cash_input,
                     prev_net_cf=prev_net_cf_input,
+                    target_year=target_year,
                 )
                 st.session_state["cf_menu_results"] = {
                     "cf": cf_data,
                     "entity_type": entity_type,
                     "filename": uploaded_cf.name,
                     "preview_txt": preview_txt,
+                    "target_year": target_year,
                 }
 
     if "cf_menu_results" in st.session_state:
@@ -1318,7 +1380,7 @@ def page_cash_flow():
         cf = res_cf["cf"]
         st.markdown("---")
 
-        st.markdown("### 1. Cash Flow Overview (Ringkasan Arus Kas)")
+        st.markdown(f"### 1. Cash Flow Overview (Ringkasan Arus Kas — Tahun {res_cf.get('target_year', '2024')})")
         ov1, ov2, ov3, ov4 = st.columns(4)
         with ov1:
             metric_card("Total Cash Inflow", format_rupiah(cf["total_inflow"]))
@@ -1412,7 +1474,7 @@ def page_cash_flow():
 
         if st.button("✨ Generate Analisis Naratif AI Mendalam", use_container_width=True, key="cf_ai_btn"):
             ctx_cf = (
-                f"Entitas: {res_cf['entity_type']} | File: {res_cf['filename']}\n"
+                f"Entitas: {res_cf['entity_type']} | File: {res_cf['filename']} | Tahun: {res_cf.get('target_year', '2024')}\n"
                 f"Cash Inflow: {cf['total_inflow']}, Cash Outflow: {cf['total_outflow']}, Net CF: {cf['net_cf']}, "
                 f"Saldo Awal: {cf['opening_cash']}, Saldo Akhir: {cf['ending_cash']}\n"
                 f"Operasi: {cf['op_cf']}, Investasi: {cf['inv_cf']}, Pendanaan: {cf['fin_cf']}\n"
