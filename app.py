@@ -246,7 +246,8 @@ def audit_outliers_iqr(df, amount_col):
                     findings.append({"module": "Anomali Nominal (Outlier)", "risk_level": "Tinggi", "title": f"{len(flagged)} nilai ekstrem (di luar batas IQR)", "detail": f"Batas wajar: {lower:,.0f} s.d {upper:,.0f}", "recommendation": "Uji petik transaksi terbesar/terkecil."})
         except: pass
     return findings, flagged
-    # ============================================================
+
+# ============================================================
 # SMART FINANCIAL ENGINE & INSIGHT
 # ============================================================
 def auto_extract_financials(df, entity_type):
@@ -464,7 +465,8 @@ def generate_fin_pdf(nilai, rasio, entity_type):
     doc.build(elements)
     buffer.seek(0)
     return buffer
-    # ============================================================
+
+# ============================================================
 # UI COMPONENTS & HALAMAN
 # ============================================================
 def finora_header(title, subtitle):
