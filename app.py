@@ -66,6 +66,8 @@ MODULE_TO_KEY = {
 }
 
 def format_rupiah(val):
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "-"
     try:
         val = float(val)
     except Exception:
@@ -80,26 +82,32 @@ def format_rupiah(val):
 
 def clean_currency(x):
     if pd.isna(x): return 0.0
-    if isinstance(x, (int, float)): return float(x)
+    if isinstance(x, (int, float, np.number)): return float(x)
     x = str(x).strip()
+    if not x or x.lower() in ("nan", "none", "-", "–", "—"):
+        return 0.0
     is_negative = False
     if x.startswith('(') and x.endswith(')'):
         is_negative = True
-        x = x[1:-1]
+        x = x[1:-1].strip()
     x = re.sub(r'[^\d,.-]', '', x)
     if not x: return 0.0
     if ',' in x and '.' in x:
         if x.rfind('.') > x.rfind(','): x = x.replace(',', '')
         else: x = x.replace('.', '').replace(',', '.')
     elif ',' in x:
-        if len(x.split(',')[-1]) == 3: x = x.replace(',', '')
-        else: x = x.replace(',', '.')
+        if len(x.split(',')[-1]) == 3 and x.count(',') >= 1 and not x.startswith('0,'):
+            x = x.replace(',', '')
+        else:
+            x = x.replace(',', '.')
     elif '.' in x:
-        if len(x.split('.')[-1]) == 3 and x.count('.') > 0: x = x.replace('.', '')
+        if len(x.split('.')[-1]) == 3 and x.count('.') > 0 and not x.startswith('0.'):
+            x = x.replace('.', '')
     try:
         val = float(x)
         return -val if is_negative else val
-    except: return 0.0
+    except Exception:
+        return 0.0
 
 def metric_card(label, value, help_text=""):
     st.markdown(f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""", unsafe_allow_html=True)
@@ -120,31 +128,52 @@ def _clean_headers(raw_headers):
 # ============================================================
 # FUNGSI MUTLAK PEMBACA EXCEL (TIDAK PAKAI PANDAS SAMA SEKALI)
 # ============================================================
-def read_raw_data(uploaded_file):
-    """Membaca file mentah tanpa memicu pandas duplicate column error."""
+def read_excel_sheets(uploaded_file):
+    """Membaca semua sheet dari file Excel/CSV dan mengembalikan dict {sheet_name: DataFrame}."""
     uploaded_file.seek(0)
     bytes_data = uploaded_file.read()
-    
-    if uploaded_file.name.endswith('xlsx'):
+    fname = uploaded_file.name.lower()
+
+    if fname.endswith(('.xlsx', '.xlsm')):
         file_stream = io.BytesIO(bytes_data)
         wb = openpyxl.load_workbook(file_stream, data_only=True, read_only=True)
-        
-        best_data = []
-        max_rows = 0
+        sheets = {}
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             data = list(ws.iter_rows(values_only=True))
-            if len(data) > max_rows:
-                max_rows = len(data)
-                best_data = data
-                
-        return pd.DataFrame(best_data)
+            if data:
+                df_sheet = pd.DataFrame(data).dropna(how="all").reset_index(drop=True)
+                if not df_sheet.empty:
+                    sheets[sheet_name] = df_sheet
+        wb.close()
+        return sheets if sheets else {"Sheet1": pd.DataFrame()}
     else:
+        for sep in [',', ';', '\t']:
+            try:
+                file_stream = io.BytesIO(bytes_data)
+                df_csv = pd.read_csv(file_stream, header=None, sep=sep, on_bad_lines='skip')
+                if df_csv.shape[1] > 1 or sep == '\t':
+                    return {"CSV": df_csv.dropna(how="all").reset_index(drop=True)}
+            except Exception:
+                continue
         file_stream = io.BytesIO(bytes_data)
-        return pd.read_csv(file_stream, header=None, on_bad_lines='skip')
+        return {"CSV": pd.read_csv(file_stream, header=None, on_bad_lines='skip').dropna(how="all").reset_index(drop=True)}
 
-def safe_read_dataframe(uploaded, header_row=0):
-    df_raw = read_raw_data(uploaded)
+def read_raw_data(uploaded_file, sheet_name=None):
+    """Membaca file mentah tanpa memicu pandas duplicate column error."""
+    sheets = read_excel_sheets(uploaded_file)
+    if sheet_name and sheet_name in sheets:
+        return sheets[sheet_name]
+    best_df = pd.DataFrame()
+    max_rows = -1
+    for df_s in sheets.values():
+        if len(df_s) > max_rows:
+            max_rows = len(df_s)
+            best_df = df_s
+    return best_df
+
+def safe_read_dataframe(uploaded, header_row=0, sheet_name=None):
+    df_raw = read_raw_data(uploaded, sheet_name=sheet_name)
     if header_row >= len(df_raw):
         return df_raw
     cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
@@ -645,7 +674,6 @@ def page_audit():
         st.markdown("### 4. Jalankan Prosedur")
         if st.button("🚀 JALANKAN PROSEDUR AUDIT", use_container_width=True):
             with st.spinner("Memproses data..."):
-                
                 if amount_col: df[amount_col] = df[amount_col].apply(clean_currency)
                 if budget_col: df[budget_col] = df[budget_col].apply(clean_currency)
                 if invoice_col: df[invoice_col] = df[invoice_col].astype(str)
@@ -787,7 +815,15 @@ def page_cash_flow():
         return
 
     try:
-        raw = read_raw_data(uploaded_cf)
+        all_sheets = read_excel_sheets(uploaded_cf)
+        sheet_names = list(all_sheets.keys())
+        if len(sheet_names) > 1:
+            default_idx = max(range(len(sheet_names)), key=lambda i: len(all_sheets[sheet_names[i]]))
+            chosen_sheet = st.selectbox("Pilih Sheet Excel", sheet_names, index=default_idx, key="cf_sheet_select")
+            raw = all_sheets[chosen_sheet]
+        else:
+            chosen_sheet = sheet_names[0]
+            raw = all_sheets[chosen_sheet]
         if raw.empty:
             st.error("File tidak berisi data yang dapat dibaca.")
             return
@@ -795,39 +831,89 @@ def page_cash_flow():
         st.error(f"Gagal membaca file: {e}")
         return
 
-    def detect_header(frame, keywords, max_scan=35):
+    def detect_header(frame, keywords, max_scan=100):
+        best_idx = 0
+        best_score = -1
         for i in range(min(max_scan, len(frame))):
-            vals = [str(v).strip().lower() for v in frame.iloc[i].tolist() if pd.notna(v)]
-            if any(any(k in val for k in keywords) for val in vals):
-                return i
-        return 0
+            vals = [str(v).strip().lower() for v in frame.iloc[i].tolist() if pd.notna(v) and str(v).strip() != ""]
+            if not vals:
+                continue
+            score = 0
+            for val in vals:
+                if any(k in val for k in keywords):
+                    score += 3
+                if re.search(r"\b(20\d{2}|19\d{2})\b", val) or "tahun" in val or "periode" in val:
+                    score += 2
+            if score > best_score and score > 0:
+                best_score = score
+                best_idx = i
+        return best_idx
 
     def to_number(value):
         return clean_currency(value)
 
+    def guess_line_activity(label):
+        low = str(label).lower()
+        if any(k in low for k in [
+            "aset tetap", "perolehan aset", "pembelian aset", "penjualan aset",
+            "investasi", "deposito", "properti investasi", "aset takberwujud", "capex"
+        ]):
+            return "investasi"
+        if any(k in low for k in [
+            "pinjaman", "utang bank", "obligasi", "modal saham", "setoran modal",
+            "dividen", "sewa pembiayaan", "liabilitas sewa", "saham treasuri", "pendanaan"
+        ]):
+            return "pendanaan"
+        if any(k in low for k in [
+            "pelanggan", "pemasok", "karyawan", "beban operasi", "pajak penghasilan",
+            "bunga dibayar", "bunga diterima", "operasi", "kas dari aktivitas operasi",
+            "penerimaan kas", "pembayaran kas", "piutang", "persediaan", "utang usaha"
+        ]):
+            return "operasi"
+        return "other"
+
     def classify_cash_flow(label, current_section=""):
         s = str(label).strip().lower()
-        if not s or s in ("nan", "none"):
+        s_clean = re.sub(r"\s+", " ", s)
+        if not s_clean or s_clean in ("nan", "none", "-", "–", "—"):
             return current_section, "skip"
-        if "aktivitas operasi" in s and ("arus kas" in s or s.startswith("arus kas")):
-            return "operasi", "section"
-        if "aktivitas investasi" in s and ("arus kas" in s or s.startswith("arus kas")):
-            return "investasi", "section"
-        if "aktivitas pendanaan" in s and ("arus kas" in s or s.startswith("arus kas")):
-            return "pendanaan", "section"
-        if any(k in s for k in ["kenaikan neto kas", "penurunan neto kas", "kas dan setara kas pada awal",
-                                "kas dan setara kas pada akhir", "pengaruh perubahan kurs"]):
+
+        # Deteksi header bagian PSAK 207
+        is_subtotal_phrase = any(k in s_clean for k in [
+            "kas yang dihasilkan dari", "kas neto diperoleh dari", "kas neto yang diperoleh dari",
+            "kas neto digunakan untuk", "kas neto yang digunakan untuk",
+            "jumlah arus kas", "total arus kas", "subtotal"
+        ])
+        if not is_subtotal_phrase:
+            if ("aktivitas operasi" in s_clean or "arus kas operasi" in s_clean) and len(s_clean) <= 75:
+                return "operasi", "section"
+            if ("aktivitas investasi" in s_clean or "arus kas investasi" in s_clean) and len(s_clean) <= 75:
+                return "investasi", "section"
+            if ("aktivitas pendanaan" in s_clean or "arus kas pendanaan" in s_clean) and len(s_clean) <= 75:
+                return "pendanaan", "section"
+
+        # Deteksi baris rekonsiliasi saldo kas
+        if any(k in s_clean for k in [
+            "kenaikan neto kas", "penurunan neto kas", "kenaikan (penurunan) neto kas",
+            "kenaikan/(penurunan) neto kas", "kenaikan bersih kas", "penurunan bersih kas",
+            "perubahan neto kas", "kas dan setara kas pada awal", "kas dan setara kas awal",
+            "saldo kas awal", "kas awal tahun", "kas awal periode",
+            "kas dan setara kas pada akhir", "kas dan setara kas akhir",
+            "saldo kas akhir", "kas akhir tahun", "kas akhir periode",
+            "pengaruh perubahan kurs", "selisih kurs"
+        ]):
             return current_section, "recon"
-        if any(k in s for k in ["kas yang dihasilkan dari aktivitas", "kas neto diperoleh dari aktivitas",
-                                "kas neto digunakan untuk aktivitas"]):
+
+        # Lewati baris subtotal bagian agar tidak double-counting
+        if is_subtotal_phrase:
             return current_section, "subtotal"
-        if current_section == "operasi":
-            return current_section, "operasi"
-        if current_section == "investasi":
-            return current_section, "investasi"
-        if current_section == "pendanaan":
-            return current_section, "pendanaan"
-        return current_section, "other"
+
+        if current_section in ("operasi", "investasi", "pendanaan"):
+            return current_section, current_section
+
+        # Fallback jika laporan tidak memiliki judul bagian eksplisit
+        inferred = guess_line_activity(s_clean)
+        return current_section, inferred
 
     def make_cf_excel(statement_df, ratios, summary, trend_df=None, anomalies=None):
         buff = io.BytesIO()
@@ -836,9 +922,10 @@ def page_cash_flow():
             pd.DataFrame([{"Indikator": k, "Nilai": v} for k, v in summary.items()]).to_excel(
                 writer, sheet_name="Ringkasan", index=False
             )
-            pd.DataFrame([{"Rasio": k, "Nilai": v} for k, v in ratios.items()]).to_excel(
-                writer, sheet_name="Rasio Arus Kas", index=False
-            )
+            if ratios:
+                pd.DataFrame([{"Rasio": k, "Nilai": v} for k, v in ratios.items()]).to_excel(
+                    writer, sheet_name="Rasio Arus Kas", index=False
+                )
             if trend_df is not None and not trend_df.empty:
                 trend_df.to_excel(writer, sheet_name="Tren", index=False)
             if anomalies is not None and not anomalies.empty:
@@ -872,7 +959,7 @@ def page_cash_flow():
         ]
         summary_rows = [["Indikator", "Nilai"]]
         for key, value in summary.items():
-            shown = format_rupiah(value) if isinstance(value, (int, float, np.number)) else str(value)
+            shown = format_rupiah(value) if isinstance(value, (int, float, np.number)) else str(value if value is not None else "-")
             summary_rows.append([str(key), shown])
         summary_table = Table(summary_rows, colWidths=[230, 260], repeatRows=1)
         summary_table.setStyle(TableStyle([
@@ -885,7 +972,7 @@ def page_cash_flow():
         ]))
         elements.extend([summary_table, Spacer(1, 14), Paragraph("Rincian Data", heading_style)])
         if detail_df is not None and not detail_df.empty:
-            preview = detail_df.head(30).copy()
+            preview = detail_df.head(40).copy()
             pdf_rows = [[str(c) for c in preview.columns]]
             for row in preview.itertuples(index=False, name=None):
                 pdf_rows.append([str(v)[:80] for v in row])
@@ -904,45 +991,20 @@ def page_cash_flow():
         buff.seek(0)
         return buff
 
-    def render_cashflow_insights(cfo, cfi, cff, net_change, opening_cash, closing_cash, ratios):
-        insights = []
-        if cfo > 0:
-            insights.append("Arus kas operasi positif; kegiatan utama menghasilkan kas pada periode yang dianalisis.")
-        elif cfo < 0:
-            insights.append("Arus kas operasi negatif; evaluasi penerimaan pelanggan, pembayaran pemasok, dan kebutuhan modal kerja.")
-        else:
-            insights.append("Arus kas operasi nol atau belum dapat ditentukan; pastikan rincian transaksi operasi tersedia.")
-        if cfi < 0:
-            insights.append("Arus kas investasi negatif dapat menunjukkan pembelian aset atau investasi; nilai manfaat dan sumber pendanaannya perlu dievaluasi.")
-        elif cfi > 0:
-            insights.append("Arus kas investasi positif; periksa apakah berasal dari pelepasan aset/investasi dan apakah bersifat berulang.")
-        if cff > 0:
-            insights.append("Arus kas pendanaan positif; periksa apakah kenaikan kas didorong pinjaman atau tambahan modal.")
-        elif cff < 0:
-            insights.append("Arus kas pendanaan negatif; dapat berkaitan dengan pembayaran pinjaman, dividen, atau pengembalian modal.")
-        if closing_cash < 0:
-            insights.append("Saldo kas akhir negatif/tidak wajar; periksa saldo awal, kelengkapan transaksi, dan klasifikasi kas.")
-        if opening_cash is not None and closing_cash is not None:
-            insights.append(
-                f"Rekonsiliasi saldo: saldo awal {format_rupiah(opening_cash)} ditambah perubahan kas "
-                f"{format_rupiah(net_change)} menghasilkan saldo akhir {format_rupiah(closing_cash)}."
-            )
-        return insights
-
-    # Pilih jenis sumber agar file transaksi tidak salah dibaca sebagai laporan formal.
     mode = st.radio(
         "Jenis data yang diunggah",
         ["Deteksi otomatis", "Laporan arus kas (statement)", "Data transaksi / mutasi bank"],
         horizontal=True,
         key="cf_mode"
     )
+    file_sig = f"{uploaded_cf.name}_{chosen_sheet}_{raw.shape}"
     header_guess = detect_header(raw, ["uraian", "keterangan", "deskripsi", "tanggal", "date", "pos", "akun"])
     header_row = st.number_input(
         "Baris header kolom (mulai dari 0)",
         min_value=0,
         max_value=max(0, len(raw) - 1),
         value=int(header_guess),
-        key="cf_header_v2"
+        key=f"cf_header_{file_sig}"
     )
     headers = _clean_headers(raw.iloc[int(header_row)].tolist())
     data = raw.iloc[int(header_row) + 1:].copy()
@@ -960,24 +1022,47 @@ def page_cash_flow():
         st.markdown("### 1. Pemetaan laporan arus kas")
         desc_candidates = [c for c in data.columns if any(k in str(c).lower() for k in ["uraian", "keterangan", "deskripsi", "pos", "akun"])]
         desc_default = desc_candidates[0] if desc_candidates else data.columns[0]
-        desc_col = st.selectbox("Kolom uraian / keterangan", list(data.columns), index=list(data.columns).index(desc_default), key="cf_stmt_desc")
+        desc_col = st.selectbox(
+            "Kolom uraian / keterangan",
+            list(data.columns),
+            index=list(data.columns).index(desc_default),
+            key=f"cf_stmt_desc_{file_sig}_{header_row}"
+        )
+
+        # Pindai SELURUH baris (bukan hanya 30 baris pertama) + deteksi header tahun/periode
         numeric_candidates = []
+        year_candidates = []
         for c in data.columns:
-            vals = data[c].dropna().head(30)
-            if c != desc_col and len(vals) and sum(to_number(v) != 0 for v in vals) >= max(1, len(vals) // 3):
+            if c == desc_col:
+                continue
+            col_lower = str(c).lower()
+            is_year_header = bool(re.search(r"\b(20\d{2}|19\d{2})\b", col_lower)) or any(
+                k in col_lower for k in ["tahun", "periode", "nominal", "jumlah", "nilai", "rp", "idr"]
+            )
+            vals = data[c].dropna()
+            non_zero_count = sum(to_number(v) != 0 for v in vals)
+            if non_zero_count >= 1 or is_year_header:
                 numeric_candidates.append(c)
+                if is_year_header:
+                    year_candidates.append(c)
+
         if not numeric_candidates:
             numeric_candidates = [c for c in data.columns if c != desc_col]
         if not numeric_candidates:
             st.error("Kolom nominal/periode tidak ditemukan. Periksa struktur file.")
             return
+
+        default_periods = year_candidates if year_candidates else numeric_candidates
         selected_periods = st.multiselect(
             "Pilih kolom nominal/periode yang akan dianalisis",
             numeric_candidates,
-            default=numeric_candidates[:2] if len(numeric_candidates) > 1 else numeric_candidates,
-            key="cf_stmt_periods"
+            default=default_periods,
+            key=f"cf_stmt_periods_{file_sig}_{header_row}"
         )
-        st.dataframe(data.head(12), use_container_width=True)
+
+        with st.expander(f"👁️ Pratinjau Seluruh Data Terbaca ({len(data)} baris)", expanded=False):
+            st.dataframe(data, use_container_width=True)
+
         if not selected_periods:
             st.warning("Pilih minimal satu kolom nominal/periode.")
             return
@@ -987,12 +1072,21 @@ def page_cash_flow():
             for period_col in selected_periods:
                 section = ""
                 totals = {"operasi": 0.0, "investasi": 0.0, "pendanaan": 0.0}
-                opening_cash, closing_cash, fx_effect = None, None, 0.0
+                opening_cash, closing_cash, reported_net_change, fx_effect = None, None, None, 0.0
                 line_items = []
+                unclassified_items = []
+
                 for _, row in data.iterrows():
-                    label = str(row[desc_col]).strip()
+                    raw_label = row[desc_col]
+                    if pd.isna(raw_label):
+                        continue
+                    label = str(raw_label).strip()
+                    if not label or label.lower() in ("nan", "none"):
+                        continue
+
                     value = to_number(row[period_col])
                     section, kind = classify_cash_flow(label, section)
+
                     if kind in ("operasi", "investasi", "pendanaan"):
                         totals[kind] += value
                         line_items.append({"Aktivitas": kind.title(), "Uraian": label, "Nilai": value})
@@ -1004,23 +1098,47 @@ def page_cash_flow():
                             closing_cash = value
                         elif "kurs" in low:
                             fx_effect = value
+                        elif any(k in low for k in ["kenaikan", "penurunan", "perubahan"]):
+                            reported_net_change = value
+                    elif kind == "other" and value != 0:
+                        unclassified_items.append({"Uraian": label, "Nilai": value})
+
                 net_change = sum(totals.values())
+                if net_change == 0 and reported_net_change is not None:
+                    net_change = reported_net_change
                 calculated_closing = (opening_cash + net_change + fx_effect) if opening_cash is not None else None
                 if closing_cash is None and calculated_closing is not None:
                     closing_cash = calculated_closing
-                fcf = totals["operasi"] - abs(sum(
+
+                capex = abs(sum(
                     x["Nilai"] for x in line_items
-                    if x["Aktivitas"] == "Investasi" and any(k in x["Uraian"].lower() for k in ["pembelian aset tetap", "perolehan aset tetap", "capital expenditure", "capex"])
+                    if x["Aktivitas"] == "Investasi" and any(
+                        k in x["Uraian"].lower() for k in [
+                            "pembelian aset tetap", "perolehan aset tetap", "pembelian aset",
+                            "perolehan aset", "capital expenditure", "capex"
+                        ]
+                    )
                 ))
+                fcf = totals["operasi"] - capex
                 statement_results[period_col] = {
-                    "totals": totals, "opening_cash": opening_cash, "closing_cash": closing_cash,
-                    "calculated_closing": calculated_closing, "fx_effect": fx_effect,
-                    "net_change": net_change, "fcf": fcf, "line_items": line_items
+                    "totals": totals,
+                    "opening_cash": opening_cash,
+                    "closing_cash": closing_cash,
+                    "calculated_closing": calculated_closing,
+                    "fx_effect": fx_effect,
+                    "net_change": net_change,
+                    "fcf": fcf,
+                    "line_items": line_items,
+                    "unclassified_items": unclassified_items
                 }
+
             st.session_state["cf_statement_results"] = {
-                "results": statement_results, "filename": uploaded_cf.name, "desc_col": desc_col
+                "results": statement_results,
+                "filename": uploaded_cf.name,
+                "desc_col": desc_col,
+                "total_rows_read": len(data)
             }
-            st.success("Analisis laporan arus kas selesai.")
+            st.success(f"Analisis laporan arus kas selesai ({len(statement_results)} periode & {len(data)} baris terbaca).")
 
         if "cf_statement_results" in st.session_state:
             saved = st.session_state["cf_statement_results"]
@@ -1052,6 +1170,12 @@ def page_cash_flow():
             ])
             with t1:
                 st.dataframe(statement_view, use_container_width=True, hide_index=True)
+                if item["line_items"]:
+                    with st.expander(f"📑 Rincian Pos Terklasifikasi ({len(item['line_items'])} baris)", expanded=True):
+                        st.dataframe(pd.DataFrame(item["line_items"]), use_container_width=True, hide_index=True)
+                if item.get("unclassified_items"):
+                    with st.expander(f"⚠️ Pos Belum Terklasifikasi ({len(item['unclassified_items'])} baris)", expanded=False):
+                        st.dataframe(pd.DataFrame(item["unclassified_items"]), use_container_width=True, hide_index=True)
                 st.caption("Pengelompokan otomatis menggunakan uraian akun. Tinjau kembali klasifikasi setiap baris sebelum memakai hasil sebagai laporan resmi.")
             with t2:
                 st.markdown("Rasio yang dapat dihitung dari laporan arus kas dan data pendukung yang tersedia:")
@@ -1084,7 +1208,8 @@ def page_cash_flow():
                         "Operasi": result["totals"]["operasi"],
                         "Investasi": result["totals"]["investasi"],
                         "Pendanaan": result["totals"]["pendanaan"],
-                        "Perubahan Kas": result["net_change"]
+                        "Perubahan Kas": result["net_change"],
+                        "Saldo Kas Akhir": result["closing_cash"]
                     })
                 trend_df = pd.DataFrame(trend_rows)
                 st.plotly_chart(
@@ -1262,7 +1387,7 @@ def page_cash_flow():
             "anomalies": anomalies, "filename": uploaded_cf.name
         }
         st.session_state["cf_transaction_results"] = result
-        st.success("Analisis transaksi berhasil dijalankan.")
+        st.success(f"Analisis transaksi berhasil dijalankan ({len(work)} transaksi terbaca).")
 
     if "cf_transaction_results" in st.session_state:
         res = st.session_state["cf_transaction_results"]
