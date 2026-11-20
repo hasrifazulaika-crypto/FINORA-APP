@@ -60,42 +60,27 @@ def format_rupiah(val):
     else: return f"Rp {val:,.0f}"
 
 def clean_currency(x):
-    """Fungsi untuk membersihkan teks angka (Rp, titik, koma) menjadi float murni"""
-    if pd.isna(x):
-        return 0.0
-    if isinstance(x, (int, float)):
-        return float(x)
-    
+    if pd.isna(x): return 0.0
+    if isinstance(x, (int, float)): return float(x)
     x = str(x).strip()
     is_negative = False
     if x.startswith('(') and x.endswith(')'):
         is_negative = True
         x = x[1:-1]
-    
     x = re.sub(r'[^\d,.-]', '', x)
-    
-    if not x:
-        return 0.0
-        
+    if not x: return 0.0
     if ',' in x and '.' in x:
-        if x.rfind('.') > x.rfind(','): 
-            x = x.replace(',', '')
-        else: 
-            x = x.replace('.', '').replace(',', '.')
+        if x.rfind('.') > x.rfind(','): x = x.replace(',', '')
+        else: x = x.replace('.', '').replace(',', '.')
     elif ',' in x:
-        if len(x.split(',')[-1]) == 3: 
-            x = x.replace(',', '')
-        else: 
-            x = x.replace(',', '.')
+        if len(x.split(',')[-1]) == 3: x = x.replace(',', '')
+        else: x = x.replace(',', '.')
     elif '.' in x:
-        if len(x.split('.')[-1]) == 3 and x.count('.') > 0: 
-            x = x.replace('.', '')
-            
+        if len(x.split('.')[-1]) == 3 and x.count('.') > 0: x = x.replace('.', '')
     try:
         val = float(x)
         return -val if is_negative else val
-    except:
-        return 0.0
+    except: return 0.0
 
 def metric_card(label, value, help_text=""):
     st.markdown(f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""", unsafe_allow_html=True)
@@ -196,10 +181,7 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
 # AUDIT ENGINE
 # ============================================================
 def auto_detect_columns(df):
-    """Deteksi kolom super pintar, memaksa pilih kolom pertama jika gagal"""
     mapping = {"date": None, "amount": None, "desc": None, "budget": None, "invoice": None}
-    
-    # 1. Berdasarkan Nama Kolom
     for col in df.columns:
         c = str(col).lower()
         if not mapping["date"] and any(k in c for k in ["tanggal", "tgl", "date", "waktu", "periode"]): mapping["date"] = col
@@ -207,18 +189,13 @@ def auto_detect_columns(df):
         if not mapping["budget"] and any(k in c for k in ["anggaran", "budget", "pagu"]): mapping["budget"] = col
         if not mapping["desc"] and any(k in c for k in ["deskripsi", "keterangan", "uraian", "category", "kategori", "nama", "item", "barang"]): mapping["desc"] = col
         if not mapping["invoice"] and any(k in c for k in ["invoice", "faktur", "nota", "ref", "no."]): mapping["invoice"] = col
-        
-    # 2. Berdasarkan Isi Data (Mengakali 'Unnamed')
     for col in df.columns:
         sample = df[col].dropna().astype(str).head(20)
         if sample.empty: continue
         if not mapping["date"] and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5: mapping["date"] = col
         elif not mapping["amount"] and col != mapping["date"] and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5: mapping["amount"] = col
-            
-    # 3. Fallback Posisi (Paksa isi agar tidak ada warning)
     if not mapping["date"] and len(df.columns) > 0: mapping["date"] = df.columns[0]
     if not mapping["amount"] and len(df.columns) > 1: mapping["amount"] = df.columns[1]
-    
     return mapping
 
 def audit_empty(df, cols_to_check):
@@ -379,7 +356,6 @@ def get_detailed_insight(ratio_name, val):
         elif "Current Ratio" in ratio_name: return "<b>Kondisi:</b> 0x.<br><b>Penyebab:</b> Aset Lancar 0.<br><b>Dampak:</b> Risiko Likuiditas Ekstrem.<br><b>Rekomendasi:</b> Tambah modal kerja."
         elif "Debt to Equity" in ratio_name: return "<b>Kondisi:</b> 0x.<br><b>Penyebab:</b> Tidak ada utang.<br><b>Dampak:</b> Sangat Aman.<br><b>Rekomendasi:</b> Bisa mulai gunakan utang produktif."
         else: return "<b>Kondisi:</b> Rasio tidak dapat dihitung.<br><b>Rekomendasi:</b> Periksa format Excel."
-
     if "Efektivitas" in ratio_name:
         if val >= 100: return "<b>Kondisi:</b> Sangat Baik.<br><b>Penyebab:</b> Kinerja pemungutan optimal.<br><b>Dampak:</b> Kapasitas fiskal meningkat.<br><b>Rekomendasi:</b> Pertahankan, eksplorasi PAD baru."
         elif val >= 90: return "<b>Kondisi:</b> Baik.<br><b>Penyebab:</b> Pemungutan sesuai rencana.<br><b>Dampak:</b> Keuangan stabil.<br><b>Rekomendasi:</b> Tingkatkan pengawasan."
@@ -730,27 +706,19 @@ def page_cash_flow():
     if uploaded_cf:
         df_cf = pd.read_excel(uploaded_cf, header=header_row_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_row_cf)
         
-        # --- SISTEM DETEKSI PAKSA (TIDAK MUNGKIN GAGAL) ---
         auto_tgl, auto_ket, auto_nom = "", "", ""
-        
-        # 1. Cari berdasarkan Nama Kolom
         for c in df_cf.columns:
             c_low = str(c).lower()
             if not auto_tgl and any(k in c_low for k in ["tanggal", "tgl", "date", "waktu", "periode"]): auto_tgl = c
             if not auto_ket and any(k in c_low for k in ["keterangan", "deskripsi", "uraian", "nama", "category", "kategori", "transaksi", "ket"]): auto_ket = c
             if not auto_nom and any(k in c_low for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit", "mutasi", "total"]): auto_nom = c
             
-        # 2. Cari berdasarkan Isi Data
         for c in df_cf.columns:
             sample = df_cf[c].dropna().head(20).astype(str)
             if sample.empty: continue
-            
-            if not auto_tgl and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5:
-                auto_tgl = c
-            elif not auto_nom and c != auto_tgl and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5:
-                auto_nom = c
+            if not auto_tgl and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5: auto_tgl = c
+            elif not auto_nom and c != auto_tgl and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5: auto_nom = c
                 
-        # 3. PAKSA ISI (Fallback Posisi) -> Biar warning "Choose an option" hilang
         if not auto_tgl: auto_tgl = df_cf.columns[0]
         if not auto_nom: auto_nom = df_cf.columns[1] if len(df_cf.columns) > 1 else df_cf.columns[0]
         if not auto_ket:
@@ -760,14 +728,12 @@ def page_cash_flow():
         st.markdown("### 2. Pemetaan Kolom (Otomatis)")
         st.success("✨ FINORA AI telah mendeteksi kolom secara otomatis. Kamu bisa langsung menjalankan analisis.")
         
-        # Tampilkan pilihan di dalam Expander (Tertutup rapi)
         with st.expander("⚙️ Lihat / Koreksi Pemetaan Kolom", expanded=False):
             c3, c4, c5 = st.columns(3)
             col_tgl = c3.selectbox("Kolom Tanggal", list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl))
             col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket in list(df_cf.columns) else 0)
             col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom))
         
-        # --- LANGSUNG PROSES TANPA WARNING ---
         df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce')
         df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
         
@@ -780,15 +746,15 @@ def page_cash_flow():
             
         st.info(f"📊 Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
         
-        st.markdown("### 3. Pengaturan Saldo Awal")
-        saldo_awal = st.number_input("Masukkan Saldo Kas Awal (Rp)", min_value=0, value=10000000, step=1000000)
-        
+        # --- BAGIAN PENGATURAN SALDO AWAL DIHAPUS ---
+        # Langsung tombol jalankan analisis
         if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
             with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
-                df_cf['Running Balance'] = saldo_awal + df_cf[col_nom].cumsum()
+                # Running balance mulai dari 0 (hanya menghitung net flow dari data excel)
+                df_cf['Running Balance'] = df_cf[col_nom].cumsum() 
                 total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
                 total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
-                saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else saldo_awal
+                saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else 0
                 
                 bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
                 burn_rate = abs(total_keluar) / bulan_unik
@@ -798,7 +764,7 @@ def page_cash_flow():
                     "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
                     "total_masuk": total_masuk, "total_keluar": total_keluar, 
                     "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
-                    "bulan_bertahan": bulan_bertahan, "saldo_awal": saldo_awal
+                    "bulan_bertahan": bulan_bertahan
                 }
 
     if 'cf_results' in st.session_state:
@@ -808,14 +774,14 @@ def page_cash_flow():
         m1, m2, m3, m4 = st.columns(4)
         with m1: metric_card("Total Masuk", format_rupiah(res_cf['total_masuk']))
         with m2: metric_card("Total Keluar", format_rupiah(res_cf['total_keluar']))
-        with m3: metric_card("Saldo Akhir", format_rupiah(res_cf['saldo_akhir']))
+        with m3: metric_card("Saldo Akhir (Net)", format_rupiah(res_cf['saldo_akhir']))
         with m4: metric_card("Cash Runway", f"{res_cf['bulan_bertahan']:.1f} Bulan", help_text="Estimasi berapa bulan kas Anda akan bertahan.")
         
         tab_grafik_cf, tab_deteksi_cf, tab_ai_cf = st.tabs(["📈 Tren & Kategori", "🚨 Deteksi Anomali", "🧠 AI Cash Flow Advisor"])
         
         with tab_grafik_cf:
-            st.markdown("#### Tren Saldo Kas")
-            fig_area = px.area(res_cf['df'], x=res_cf['col_tgl'], y='Running Balance', title="Pergerakan Saldo Kas", color_discrete_sequence=['#FF5C8B'])
+            st.markdown("#### Tren Saldo Kas (Net)")
+            fig_area = px.area(res_cf['df'], x=res_cf['col_tgl'], y='Running Balance', title="Pergerakan Saldo Kas (Akumulasi Net)", color_discrete_sequence=['#FF5C8B'])
             fig_area.update_traces(fillcolor='rgba(255, 92, 139, 0.2)', line_color='#7A1F3D', line_width=3)
             st.plotly_chart(fig_area, use_container_width=True)
             
@@ -839,8 +805,8 @@ def page_cash_flow():
         with tab_ai_cf:
             st.markdown("### 🤖 AI Cash Flow Advisor")
             if st.button("Analisis Kesehatan Cash Flow", use_container_width=True):
-                context_cf = f"Data Arus Kas:\n- Saldo Awal: Rp {res_cf['saldo_awal']:,.0f}\n- Total Pemasukan: Rp {res_cf['total_masuk']:,.0f}\n- Total Pengeluaran: Rp {res_cf['total_keluar']:,.0f}\n- Saldo Akhir: Rp {res_cf['saldo_akhir']:,.0f}\n- Rata-rata Pengeluaran Bulanan: Rp {res_cf['burn_rate']:,.0f}\n- Estimasi Kas Bertahan (Runway): {res_cf['bulan_bertahan']:.1f} Bulan"
-                prompt_cf = "Sebagai Konsultan Keuangan, berikan analisis atas arus kas ini.\n1. Berapa lama perusahaan bisa bertahan?\n2. Apa saran konkret untuk memperpanjang cash runway?\n3. Berikan simulasi: 'Jika memotong biaya operasional 20%, berapa lama cash flow bertahan?'"
+                context_cf = f"Data Arus Kas:\n- Total Pemasukan: Rp {res_cf['total_masuk']:,.0f}\n- Total Pengeluaran: Rp {res_cf['total_keluar']:,.0f}\n- Saldo Akhir (Net): Rp {res_cf['saldo_akhir']:,.0f}\n- Rata-rata Pengeluaran Bulanan: Rp {res_cf['burn_rate']:,.0f}\n- Estimasi Kas Bertahan (Runway): {res_cf['bulan_bertahan']:.1f} Bulan"
+                prompt_cf = "Sebagai Konsultan Keuangan, berikan analisis atas arus kas ini.\n1. Berapa lama perusahaan bisa bertahan berdasarkan arus kas bersihnya?\n2. Apa saran konkret untuk memperpanjang cash runway?\n3. Berikan simulasi: 'Jika memotong biaya operasional 20%, berapa lama cash flow bertahan?'"
                 with st.chat_message("assistant"): st.write_stream(ask_gemini_stream(prompt_cf, context_cf, system_role="Konsultan Keuangan & Cash Flow Specialist"))
                 st.success("Analisis AI Selesai.")
 
