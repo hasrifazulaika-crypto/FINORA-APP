@@ -118,37 +118,35 @@ def _clean_headers(raw_headers):
     return cleaned
 
 # ============================================================
-# FUNGSI MUTLAK PEMBACA EXCEL (BYPASS PANDAS ERROR)
+# FUNGSI MUTLAK PEMBACA EXCEL (TIDAK PAKAI PANDAS SAMA SEKALI)
 # ============================================================
-def read_excel_manual(uploaded_file):
-    """Membaca Excel murni via openpyxl, cari sheet yang paling banyak datanya."""
+def read_raw_data(uploaded_file):
+    """Membaca file mentah tanpa memicu pandas duplicate column error."""
     uploaded_file.seek(0)
-    wb = openpyxl.load_workbook(uploaded_file, data_only=True, read_only=True)
+    bytes_data = uploaded_file.read()
     
-    best_data = []
-    max_rows = 0
-    
-    # Loop semua sheet, ambil yang barisnya paling banyak
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        data = list(ws.iter_rows(values_only=True))
-        if len(data) > max_rows:
-            max_rows = len(data)
-            best_data = data
-            
-    return pd.DataFrame(best_data)
+    if uploaded_file.name.endswith('xlsx'):
+        file_stream = io.BytesIO(bytes_data)
+        wb = openpyxl.load_workbook(file_stream, data_only=True, read_only=True)
+        
+        best_data = []
+        max_rows = 0
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            data = list(ws.iter_rows(values_only=True))
+            if len(data) > max_rows:
+                max_rows = len(data)
+                best_data = data
+                
+        return pd.DataFrame(best_data)
+    else:
+        file_stream = io.BytesIO(bytes_data)
+        return pd.read_csv(file_stream, header=None, on_bad_lines='skip')
 
 def safe_read_dataframe(uploaded, header_row=0):
-    """Membaca dataframe secara aman, kebal dari error duplikat kolom"""
-    if uploaded.name.endswith('xlsx'):
-        df_raw = read_excel_manual(uploaded)
-    else:
-        uploaded.seek(0)
-        df_raw = pd.read_csv(uploaded, header=None)
-        
+    df_raw = read_raw_data(uploaded)
     if header_row >= len(df_raw):
         return df_raw
-        
     cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
     df = df_raw.iloc[header_row + 1:].copy()
     df.columns = cleaned
@@ -779,10 +777,7 @@ def page_cash_flow():
     if uploaded_cf:
         try:
             # === MUTLAK: BACA EXCEL VIA OPENPYXL (BUKAN PANDAS) ===
-            if uploaded_cf.name.endswith('xlsx'):
-                df_raw = read_excel_manual(uploaded_cf)
-            else:
-                df_raw = pd.read_csv(uploaded_cf, header=None)
+            df_raw = read_raw_data(uploaded_cf)
 
             # === 1. DETEKSI LAPORAN ARUS KAS (STATEMENT) ===
             statement_header_idx = _detect_header_row(
