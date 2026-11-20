@@ -7,6 +7,7 @@ import os
 import io
 import base64
 import hashlib
+import re # <--- PERBAIKAN: Tambahan import re
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
@@ -57,6 +58,48 @@ def format_rupiah(val):
     elif abs(val) >= 1_000_000_000: return f"Rp {val/1_000_000_000:,.2f} M"
     elif abs(val) >= 1_000_000: return f"Rp {val/1_000_000:,.2f} Jt"
     else: return f"Rp {val:,.0f}"
+
+# --- PERBAIKAN: Fungsi Clean Currency untuk Membersihkan Format Angka ---
+def clean_currency(x):
+    """Fungsi untuk membersihkan teks angka (Rp, titik, koma) menjadi float murni"""
+    if pd.isna(x):
+        return 0.0
+    if isinstance(x, (int, float)):
+        return float(x)
+    
+    x = str(x).strip()
+    # Deteksi jika minus berada di kurung (format akuntansi), misal: (1.000)
+    is_negative = False
+    if x.startswith('(') and x.endswith(')'):
+        is_negative = True
+        x = x[1:-1]
+    
+    # Hapus karakter selain angka, minus, titik, dan koma
+    x = re.sub(r'[^\d,.-]', '', x)
+    
+    if not x:
+        return 0.0
+        
+    # Logika pemisah desimal dan ribuan (Mendukung format Indo dan US)
+    if ',' in x and '.' in x:
+        if x.rfind('.') > x.rfind(','): # Format US: 1,000.00
+            x = x.replace(',', '')
+        else: # Format Indo: 1.000,00
+            x = x.replace('.', '').replace(',', '.')
+    elif ',' in x:
+        if len(x.split(',')[-1]) == 3: # Kemungkinan ribuan: 1,000
+            x = x.replace(',', '')
+        else: # Kemungkinan desimal: 10,5
+            x = x.replace(',', '.')
+    elif '.' in x:
+        if len(x.split('.')[-1]) == 3 and x.count('.') > 0: # Kemungkinan ribuan: 1.000
+            x = x.replace('.', '')
+            
+    try:
+        val = float(x)
+        return -val if is_negative else val
+    except:
+        return 0.0
 
 def metric_card(label, value, help_text=""):
     st.markdown(f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""", unsafe_allow_html=True)
@@ -556,6 +599,13 @@ def page_audit():
         st.markdown("### 4. Jalankan Prosedur")
         if st.button("🚀 JALANKAN PROSEDUR AUDIT", use_container_width=True):
             with st.spinner("Memproses data..."):
+                
+                # --- PERBAIKAN: Membersihkan format angka sebelum audit ---
+                if amount_col: df[amount_col] = df[amount_col].apply(clean_currency)
+                if budget_col: df[budget_col] = df[budget_col].apply(clean_currency)
+                if invoice_col: df[invoice_col] = df[invoice_col].astype(str)
+                # ---------------------------------------------------------
+                
                 all_findings, flagged_data = [], {}
                 f, flag = audit_empty(df, [c for c in [date_col, amount_col, desc_col] if c]); all_findings.extend(f); flagged_data["Kelengkapan Kosong"] = flag
                 f, flag = audit_duplicates(df, [c for c in [date_col, amount_col, desc_col, invoice_col] if c]); all_findings.extend(f); flagged_data["Duplikasi Ekstrem"] = flag
@@ -672,10 +722,26 @@ def page_cash_flow():
     if uploaded_cf:
         df_cf = pd.read_excel(uploaded_cf, header=header_row_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_row_cf)
         
-        # AI Auto-Detect
-        auto_tgl = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["tanggal", "tgl", "date", "waktu"])), "")
-        auto_ket = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["keterangan", "deskripsi", "uraian", "nama", "category"])), "")
-        auto_nom = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit", "mutasi"])), "")
+        # --- PERBAIKAN: AI AUTO DETECT LEBIH PINTAR (Membaca isi data jika nama kolom 'Unnamed') ---
+        auto_tgl, auto_ket, auto_nom = "", "", ""
+        
+        # 1. Berdasarkan Nama Kolom
+        for c in df_cf.columns:
+            c_low = str(c).lower()
+            if not auto_tgl and any(k in c_low for k in ["tanggal", "tgl", "date", "waktu", "periode"]): auto_tgl = c
+            if not auto_ket and any(k in c_low for k in ["keterangan", "deskripsi", "uraian", "nama", "category", "kategori", "transaksi"]): auto_ket = c
+            if not auto_nom and any(k in c_low for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit", "mutasi", "total"]): auto_nom = c
+            
+        # 2. Jika gagal, tebak berdasarkan isi data
+        for c in df_cf.columns:
+            sample = df_cf[c].dropna().head(15).astype(str)
+            if sample.empty: continue
+            
+            if not auto_tgl and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5:
+                auto_tgl = c
+            elif not auto_nom and sample.str.contains(r'\d').sum() > len(sample) * 0.5:
+                auto_nom = c
+        # ----------------------------------------------------------------------------------------
         
         st.markdown("### 2. Pemetaan Kolom (Wajib)")
         st.info("✨ FINORA AI telah mendeteksi otomatis kolom. Jika ada yang salah, silakan koreksi di bawah ini.")
@@ -690,7 +756,11 @@ def page_cash_flow():
         else:
             # Proses Data
             df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce')
-            df_cf[col_nom] = pd.to_numeric(df_cf[col_nom], errors='coerce').fillna(0)
+            
+            # --- PERBAIKAN: Menggunakan clean_currency untuk baca nominal ---
+            df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
+            # -----------------------------------------------------------------
+            
             df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
             
             if col_ket:
@@ -763,6 +833,7 @@ def page_cash_flow():
                 prompt_cf = "Sebagai Konsultan Keuangan, berikan analisis atas arus kas ini.\n1. Berapa lama perusahaan bisa bertahan?\n2. Apa saran konkret untuk memperpanjang cash runway?\n3. Berikan simulasi: 'Jika memotong biaya operasional 20%, berapa lama cash flow bertahan?'"
                 with st.chat_message("assistant"): st.write_stream(ask_gemini_stream(prompt_cf, context_cf, system_role="Konsultan Keuangan & Cash Flow Specialist"))
                 st.success("Analisis AI Selesai.")
+
 def page_learning_center():
     finora_header("Akademi FINORA", "Pusat Pembelajaran Audit & Keuangan Perusahaan")
     st.markdown("Selamat datang di **Akademi FINORA**! Di sini Anda dapat mempelajari dasar-dasar audit dan analisis keuangan perusahaan.")
