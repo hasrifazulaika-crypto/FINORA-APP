@@ -1,96 +1,108 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import sqlite3
-import json
-import os
-import io
-import base64
-import hashlib
-import re 
-from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
-from google import genai
-import openpyxl  # <-- MUTLAK DIPERLUKAN UNTUK BYPASS ERROR EXCEL
+        with st.expander("Modul 3: Teknik Sampling dalam Audit"):
+            st.markdown("Auditor tidak mungkin memeriksa seluruh transaksi jika jumlahnya jutaan. Oleh karena itu, digunakan **Teknik Sampling**.\n*   **Statistical Sampling:** Menggunakan rumus matematika (seperti *Random Sampling* atau *Monetary Unit Sampling*). Cocok untuk data yang sangat besar dan homogen.\n*   **Non-Statistical Sampling (Judgmental):** Berdasarkan pengalaman auditor. (Misal: memilih transaksi di atas Rp 100 juta karena risiko lebih tinggi).\n*   **Interval Sampling:** Memilih sampel berdasarkan kelipatan angka tertentu (misal: setiap transaksi ke-50).")
+    with tab_keuangan:
+        st.markdown("### 📈 Kurikulum Analisis Keuangan")
+        with st.expander("Modul 1: 3 Laporan Keuangan Utama"):
+            st.markdown("Untuk menganalisis perusahaan, Anda harus paham 3 laporan inti:\n1. **Laporan Laba Rugi (Income Statement):** Menunjukkan kinerja operasional selama satu periode. (Pendapatan - Beban = Laba Bersih).\n2. **Neraca (Balance Sheet):** Potret posisi keuangan pada satu titik waktu tertentu. (Aset = Liabilitas + Ekuitas).\n3. **Laporan Arus Kas (Cash Flow Statement):** Melacak aliran kas masuk dan keluar (Operasi, Investasi, Pendanaan). *Ingat: Laba tinggi belum tentu kasnya ada!*")
+        with st.expander("Modul 2: Memahami Rasio Keuangan (Financial Ratios)"):
+            st.markdown("Rasio keuangan membantu kita menilai kesehatan perusahaan tanpa harus membaca seluruh angka. Terdapat 4 kategori utama:\n*   **Rasio Likuiditas (Current Ratio):** Apakah perusahaan mampu membayar utang jangka pendek? (Aset Lancar / Utang Lancar).\n*   **Rasio Solvabilitas (Debt to Equity):** Seberapa besar perusahaan bergantung pada utang? (Total Utang / Ekuitas).\n*   **Rasio Profitabilitas (ROA, ROE, NPM):** Seberapa efisien perusahaan menghasilkan laba? (Laba / Aset atau Ekuitas).\n*   **Rasio Aktivitas (Perputaran Piutang):** Seberapa cepat perusahaan menagih piutangnya?")
+        with st.expander("Modul 3: Deteksi Dini Kebangkrutan"):
+            st.markdown("Perusahaan bisa bangkrut bukan hanya karena rugi, tapi seringkali karena **Kehabisan Kas (Cash Flow Trap)**.\n\n**Tanda-tanda Bahaya:**\n*   Laba di laporan naik, tapi saldo kas menurun drastis.\n*   Piutang menumpuk tak tertagih (banyak penjualan fiktif).\n*   Ketergantungan tinggi pada utang jangka pendek untuk membiayai operasional.\n\n**Solusi:**\nGunakan analisis *Cash Runway* (seperti yang ada di menu Analisis Arus Kas FINORA) untuk melihat seberapa lama kas perusahaan bisa bertahan sebelum habis.")
 
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+def page_dashboard():
+    finora_header("Dashboard", "Ringkasan seluruh aktivitas FINORA AI")
+    conn = get_conn()
+    t_files = pd.read_sql_query("SELECT COUNT(*) c FROM files", conn).iloc[0]['c']
+    t_analyses = pd.read_sql_query("SELECT COUNT(*) c FROM analyses", conn).iloc[0]['c']
+    t_findings = pd.read_sql_query("SELECT COUNT(*) c FROM findings", conn).iloc[0]['c']
+    h_risk = pd.read_sql_query("SELECT COUNT(*) c FROM findings WHERE risk_level='Tinggi'", conn).iloc[0]['c']
+    conn.close()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📁 File Dianalisis", t_files); c2.metric("📊 Analisis Dilakukan", t_analyses); c3.metric("⚠️ Total Temuan", t_findings); c4.metric("🔴 Risiko Tinggi", h_risk)
+    st.markdown("---")
+    st.subheader("🕐 Analisis Terakhir")
+    recent = fetch_analyses()
+    if not recent.empty:
+        recent['created_at'] = pd.to_datetime(recent['created_at']).dt.strftime("%Y-%m-%d %H:%M")
+        st.dataframe(recent.head(5), use_container_width=True)
 
-# ============================================================
-# CONFIG & STYLE GLOBAL
-# ============================================================
-LOGO_FILENAME = "logo.png"
+def page_simpan():
+    finora_header("Pusat Laporan & Arsip", "Riwayat analisis dan Kertas Kerja Audit tersimpan")
+    df = fetch_analyses()
+    if df.empty:
+        st.info("Belum ada riwayat."); return
+    st.dataframe(df, use_container_width=True)
+    st.markdown("---")
+    aid = st.selectbox("Pilih ID Analisis untuk membuka KKA lengkap", df["id"].tolist())
+    if aid:
+        an = fetch_analysis_by_id(aid)
+        if an:
+            summary_data = json.loads(an["summary_json"])
+            entitas, periode, score = summary_data.get("entitas", "-"), summary_data.get("periode", "-"), summary_data.get("score", 0)
+            flagged_data = {k: pd.DataFrame(v) for k, v in summary_data.get("flagged_data", {}).items()}
+            findings_df = fetch_findings(aid)
+            findings_list = findings_df.to_dict("records")
+            render_audit_results(findings_list, flagged_data, an["filename"], entitas, periode, score)
 
-def get_base64_image(image_path):
-    if os.path.exists(image_path):
-        with open(image_path, "rb") as img_file:
-            return base64.b64encode(img_file.read()).decode()
-    return ""
+def page_landing():
+    st.markdown("""<style>[data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none; }</style>""", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, width=250)
+        else: st.markdown("<h1 style='text-align:center; font-size: 5rem;'>F</h1>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #FFF0F4 0%, #FFF5E8 100%); border-radius: 20px; margin-bottom: 40px; border: 2px solid #FF5C8B; box-shadow: 0 10px 30px rgba(255, 92, 139, 0.15);">
+        <h1 style="color: #7A1F3D; font-size: 3.5rem; margin-bottom: 15px; font-weight: 800;">FINORA AI</h1>
+        <p style="color: #2D1B24; font-size: 1.3rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+            Platform Kecerdasan Finansial untuk mendeteksi anomali (Audit) dan menyusun <b>Kertas Kerja Audit (KKA)</b> serta <b>Analisis Laporan Keuangan</b> secara otomatis.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #7A1F3D; margin-bottom: 30px; font-weight: 700;'>Dua Senjata Utama FINORA</h2>", unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""<div style="background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF5C8B;"><div style="font-size: 3rem; margin-bottom: 15px;">🔎</div><h3 style="color: #7A1F3D; margin-bottom: 10px;">Audit Profesional</h3><p style="color: #555; font-size: 0.95rem;">Mendeteksi duplikasi, transaksi weekend, overbudget, outlier, dan anomali lainnya. Hasil siap diunduh dalam format KKA (PDF & Excel).</p></div>""", unsafe_allow_html=True)
+    with col2:
+        st.markdown("""<div style="background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF5C8B;"><div style="font-size: 3rem; margin-bottom: 15px;">📈</div><h3 style="color: #7A1F3D; margin-bottom: 10px;">Analisis Keuangan</h3><p style="color: #555; font-size: 0.95rem;">Hitung rasio (Likuiditas, Profitabilitas, Solvabilitas) dan dapatkan *insight* prospek bisnis/pemerintahan dari AI Financial Advisor.</p></div>""", unsafe_allow_html=True)
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    col_cta1, col_cta2, col_cta3 = st.columns([1, 2, 1])
+    with col_cta2:
+        st.markdown("""<style>.stButton > button { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%) !important; color: white !important; font-size: 1.3rem !important; padding: 20px 30px !important; border-radius: 12px !important; border: none !important; font-weight: 800 !important; box-shadow: 0 6px 20px rgba(255, 92, 139, 0.4) !important; transition: all 0.3s ease !important; width: 100%; }</style>""", unsafe_allow_html=True)
+        if st.button("🚀 START YOUR ANALYSIS", use_container_width=True):
+            st.session_state.app_started = True
+            st.rerun()
 
-LOGO_B64 = get_base64_image(LOGO_FILENAME)
+def main():
+    if "app_started" not in st.session_state:
+        st.session_state.app_started = False
+    if not st.session_state.app_started:
+        page_landing()
+    else:
+        try:
+            st.sidebar.image(LOGO_FILENAME, width=180)
+        except:
+            st.sidebar.markdown('<h1 style="color:#FF5C8B;text-align:center;">F</h1>', unsafe_allow_html=True)
+        st.sidebar.markdown('<p style="text-align:center;font-size:12px;color:#7A1F3D;">Financial Intelligence<br>Platform</p>', unsafe_allow_html=True)
+        st.sidebar.markdown("---")
+        nav = st.sidebar.radio("Navigasi", [
+            "Dashboard", 
+            "Audit Profesional", 
+            "Analisis Keuangan", 
+            "Analisis Arus Kas", 
+            "Akademi FINORA", 
+            "Simpan"
+        ])
+        st.sidebar.markdown("---")
+        if st.sidebar.button("🏠 Kembali ke Halaman Depan", use_container_width=True):
+            st.session_state.app_started = False
+            st.rerun()
+        st.sidebar.caption("⚠️ Temuan bersifat indikasi dan perlu verifikasi dokumen fisik.")
+        if nav == "Dashboard": page_dashboard()
+        elif nav == "Audit Profesional": page_audit()
+        elif nav == "Analisis Keuangan": page_financial_analysis()
+        elif nav == "Analisis Arus Kas": page_cash_flow()
+        elif nav == "Akademi FINORA": page_learning_center()
+        elif nav == "Simpan": page_simpan()
 
-st.set_page_config(page_title="FINORA AI - Pro Audit", page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F", layout="wide")
-
-st.markdown("""
-<style>
-:root { --finora-pink: #FF5C8B; --finora-cream: #FFF5E8; --finora-rose: #F8C8D4; --finora-burgundy: #7A1F3D; --finora-text: #2D1B24; }
-.stApp { background-color: var(--finora-cream); color: var(--finora-text); }
-[data-testid="stSidebar"] { background-color: #FFF0F4; }
-.stButton > button { background-color: var(--finora-pink); color: white !important; border-radius: 12px; border: none; font-weight: 600; padding: 10px 18px; }
-.stButton > button:hover { background-color: var(--finora-burgundy); color: white !important; }
-h1, h2, h3 { color: var(--finora-burgundy); }
-.finora-header { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%); color: white; padding: 24px; border-radius: 16px; margin-bottom: 20px; }
-.finora-header h1 { color: white; margin: 0; font-size: 30px; display: flex; align-items: center; }
-.finora-header p  { color: #FFF0F4; margin: 6px 0 0 0; }
-.metric-card { background: white; padding: 16px; border-radius: 12px; border-left: 4px solid #FF5C8B; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 15px; }
-.metric-card p { color: #555; font-size: 14px; margin: 0; font-weight: 600; }
-.metric-card h3 { color: #7A1F3D; margin: 5px 0 0 0; font-size: 24px; font-weight: 700; }
-.insight-box { background-color: white; padding: 20px; border-radius: 10px; border-left: 5px solid #FF5C8B; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
-.insight-box h4 { margin-top: 0; color: #7A1F3D; font-size: 18px; margin-bottom: 10px; }
-.insight-box p { margin-bottom: 8px; font-size: 14px; line-height: 1.6; color: #333; }
-</style>
-""", unsafe_allow_html=True)
-
-# Mapping konsisten: nama modul audit → key flagged_data
-MODULE_TO_KEY = {
-    "Kelengkapan Data": "Kelengkapan Kosong",
-    "Data Duplikat": "Duplikasi Ekstrem",
-    "Observasi Nilai Negatif": "Nilai Negatif",
-    "Overbudget (Melebihi Pagu)": "Overbudget",
-    "Transaksi Weekend": "Transaksi Weekend",
-    "Kata Kunci Mencurigakan": "Kata Kunci",
-    "Anomali Nominal (Outlier)": "Outlier IQR",
-}
-
-def format_rupiah(val):
-    try:
-        val = float(val)
-    except Exception:
-        val = 0.0
-    neg = val < 0
-    v = abs(val)
-    if v >= 1_000_000_000_000: s = f"Rp {v/1_000_000_000_000:,.2f} T"
-    elif v >= 1_000_000_000:   s = f"Rp {v/1_000_000_000:,.2f} M"
-    elif v >= 1_000_000:       s = f"Rp {v/1_000_000:,.2f} Jt"
-    else:                      s = f"Rp {v:,.0f}"
-    return f"({s})" if neg else s
-
-def clean_currency(x):
-    if pd.isna(x): return 0.0
-    if isinstance(x, (int, float)): return float(x)
-    x = str(x).strip()
-    is_negative = False
-    if x.startswith('(') and x.endswith(')'):
-        is_negative = True
-        x = x[1:-1]
-    x = re.sub(r'[^\d,.-]', '', x)
-    if not x: return 0.0
-    if ',' in x and '.' in x:
-        if x.rfind('.') > x.rfind(','): x = x.replace(',', '')
-        else: x = x.replace('.', '').replace(',', '.')
-    elif ',' in x:
-        if len(x.split(',')[-1]) == 3: x = x.replace(',', '')
-        else: x = x.replace(',', '.')
+if __name__ == "__main__":
+    main()
