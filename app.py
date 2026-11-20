@@ -12,6 +12,7 @@ from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from google import genai
+import openpyxl  # <-- TAMBAHAN UNTUK BYPASS ERROR EXCEL TABLE
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -119,26 +120,32 @@ def _clean_headers(raw_headers):
     return cleaned
 
 def safe_read_dataframe(uploaded, header_row=0):
-    """Baca Excel/CSV dengan aman dari duplicate column names.
-    Fallback ke manual header cleaning jika pandas menolak."""
-    def _raw_read():
-        return (pd.read_excel(uploaded, header=None)
-                if uploaded.name.endswith('xlsx')
-                else pd.read_csv(uploaded, header=None))
+    """Baca Excel/CSV dengan aman dari duplicate column names & Excel Table (Bypass openpyxl)."""
     try:
+        uploaded.seek(0)
         return (pd.read_excel(uploaded, header=header_row)
                 if uploaded.name.endswith('xlsx')
                 else pd.read_csv(uploaded, header=header_row))
     except ValueError as e:
-        if "Duplicate column names" not in str(e):
-            raise
-        df_raw = _raw_read()
-        if header_row >= len(df_raw):
-            raise
-        cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
-        df = df_raw.iloc[header_row + 1:].copy()
-        df.columns = cleaned
-        return df.reset_index(drop=True)
+        if "Duplicate column names" in str(e):
+            uploaded.seek(0)
+            # Bypass pandas, baca pakai openpyxl murni (read_only=True)
+            if uploaded.name.endswith('xlsx'):
+                wb = openpyxl.load_workbook(uploaded, data_only=True, read_only=True)
+                ws = wb.active
+                data = list(ws.iter_rows(values_only=True))
+                df_raw = pd.DataFrame(data)
+            else:
+                df_raw = pd.read_csv(uploaded, header=None)
+                
+            if header_row >= len(df_raw):
+                raise
+            cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
+            df = df_raw.iloc[header_row + 1:].copy()
+            df.columns = cleaned
+            return df.reset_index(drop=True)
+        else:
+            raise e
 
 # ============================================================
 # DATABASE
@@ -765,9 +772,22 @@ def page_cash_flow():
     if uploaded_cf:
         try:
             # === SELALU baca dengan header=None dulu (aman dari duplicate columns) ===
-            df_raw = (pd.read_excel(uploaded_cf, header=None)
-                      if uploaded_cf.name.endswith('xlsx')
-                      else pd.read_csv(uploaded_cf, header=None))
+            if uploaded_cf.name.endswith('xlsx'):
+                uploaded_cf.seek(0)
+                try:
+                    df_raw = pd.read_excel(uploaded_cf, header=None)
+                except ValueError as e:
+                    if "Duplicate column names" in str(e):
+                        uploaded_cf.seek(0)
+                        # BACA PAKSA PAKAI OPENPYXL (Anti Error Excel Table)
+                        wb = openpyxl.load_workbook(uploaded_cf, data_only=True, read_only=True)
+                        ws = wb.active
+                        data = list(ws.iter_rows(values_only=True))
+                        df_raw = pd.DataFrame(data)
+                    else:
+                        raise e
+            else:
+                df_raw = pd.read_csv(uploaded_cf, header=None)
 
             # === 1. DETEKSI LAPORAN ARUS KAS (STATEMENT) ===
             statement_header_idx = _detect_header_row(
