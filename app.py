@@ -736,50 +736,53 @@ def page_cash_flow():
             col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket in list(df_cf.columns) else 0)
             col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom) if auto_nom in list(df_cf.columns) else 0)
             
-        # Proses Data
-        try:
-            df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce', dayfirst=True)
-            df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
-            
-            # Tampilkan preview agar user tahu terbaca atau tidak
-            with st.expander("👀 Preview Data yang Terbaca (Buka jika hasil 0)", expanded=False):
-                st.write("Pastikan kolom **Tanggal** dan **Nominal** sudah sesuai. Jika nominal bernilai 0, berarti format angka di Excel tidak dikenali.")
-                preview_cols = [col_tgl, col_nom]
-                if col_ket: preview_cols.insert(1, col_ket)
-                st.dataframe(df_cf[preview_cols].head(10))
+        # --- PERBAIKAN: SISTEM PARSING TANGGAL YANG TIDAK MUDAH MENYERAH ---
+        st.markdown("---")
+        if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
+            with st.spinner("Memproses data..."):
+                # 1. Parse Tanggal (Coba format standar, lalu coba format Excel Serial)
+                df_cf['_parsed_date'] = pd.to_datetime(df_cf[col_tgl], errors='coerce', dayfirst=True)
+                if df_cf['_parsed_date'].isna().all():
+                    df_cf['_parsed_date'] = pd.to_datetime(df_cf[col_tgl], errors='coerce', unit='D', origin='1899-12-30')
 
-            df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
-            
-            if df_cf.empty:
-                st.error("❌ Gagal memproses data: Kolom Tanggal kosong atau format tidak dikenali. Coba ubah 'Header di baris ke-' atau koreksi Pemetaan Kolom.")
-                st.stop()
-                
-            if col_ket:
-                df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
-            else:
-                df_cf['Kategori'] = 'Lainnya'
-                
-            st.info(f"📊 Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
-            
-            if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
-                with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
-                    df_cf['Running Balance'] = df_cf[col_nom].cumsum() 
+                # 2. Parse Nominal
+                df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
+
+                # 3. Cek apakah gagal total
+                if df_cf['_parsed_date'].isna().all():
+                    st.error(f"❌ Gagal membaca kolom tanggal **{col_tgl}**. Pastikan kolom tersebut berisi tanggal (contoh: 2023-01-01 atau 01/01/2023). Silakan ganti pilihan kolom di menu 'Koreksi Pemetaan Kolom' di atas.")
+                else:
+                    df_cf = df_cf.dropna(subset=['_parsed_date']).sort_values(by='_parsed_date')
+                    if col_ket:
+                        df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
+                    else:
+                        df_cf['Kategori'] = 'Lainnya'
+
+                    # Simpan ke session state
                     total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
                     total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
+                    df_cf['Running Balance'] = df_cf[col_nom].cumsum()
                     saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else 0
                     
-                    bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
+                    bulan_unik = max(1, df_cf['_parsed_date'].dt.to_period('M').nunique())
                     burn_rate = abs(total_keluar) / bulan_unik
                     bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
                     
                     st.session_state['cf_results'] = {
-                        "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
+                        "df": df_cf, "col_tgl": '_parsed_date', "col_nom": col_nom, 
                         "total_masuk": total_masuk, "total_keluar": total_keluar, 
                         "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
                         "bulan_bertahan": bulan_bertahan
                     }
-        except Exception as e:
-            st.error(f"Terjadi kesalahan saat memproses kolom: {e}")
+                    st.success("✅ Analisis berhasil dijalankan!")
+                    st.rerun()
+
+        # Preview Data Selalu Muncul (sebelum dijalankan) untuk ngecek
+        with st.expander("👀 Preview Data Mentah (Buka jika hasil 0)", expanded=False):
+            st.write(f"Preview kolom **{col_tgl}** (Tanggal) dan **{col_nom}** (Nominal):")
+            preview_cols = [col_tgl, col_nom]
+            if col_ket: preview_cols.insert(1, col_ket)
+            st.dataframe(df_cf[preview_cols].head(10))
 
     if 'cf_results' in st.session_state:
         res_cf = st.session_state['cf_results']
