@@ -51,6 +51,14 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 .insight-box { background-color: white; padding: 20px; border-radius: 10px; border-left: 5px solid #FF5C8B; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
 .insight-box h4 { margin-top: 0; color: #7A1F3D; font-size: 18px; margin-bottom: 10px; }
 .insight-box p { margin-bottom: 8px; font-size: 14px; line-height: 1.6; color: #333; }
+.ratio-card { background: linear-gradient(135deg, #FFFFFF 0%, #FFF8FA 100%); padding: 18px 20px; border-radius: 14px; border: 1px solid #F8C8D4; border-left: 5px solid #FF5C8B; box-shadow: 0 4px 12px rgba(122, 31, 61, 0.06); margin-bottom: 14px; }
+.ratio-card-muted { background: #FAFAFA; padding: 16px 20px; border-radius: 14px; border: 1px dashed #D8B4C0; margin-bottom: 14px; opacity: 0.9; }
+.ratio-title { font-size: 13px; font-weight: 700; color: #7A1F3D; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+.ratio-val { font-size: 26px; font-weight: 800; color: #2D1B24; margin: 2px 0 6px 0; }
+.ratio-sub { font-size: 12.5px; color: #665058; margin: 0; }
+.badge-ok { display: inline-block; background: #E8F5E9; color: #2E7D32; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+.badge-warn { display: inline-block; background: #FFF3E0; color: #EF6C00; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+.badge-na { display: inline-block; background: #FCE4EC; color: #AD1457; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -931,6 +939,83 @@ def page_cash_flow():
             return float(max(matched_vals))
         return 0.0
 
+    def extract_cf_ratio_inputs(df_data, desc_col_name, period_cols, line_items=None):
+        """Ekstrak otomatis nilai pendukung rasio arus kas (pendapatan, liabilitas lancar, total utang, debt service) dari file."""
+        extracted = {
+            "revenue": 0.0,
+            "current_liabilities": 0.0,
+            "total_debt": 0.0,
+            "debt_service": 0.0,
+            "sources": {
+                "revenue": "-",
+                "current_liabilities": "-",
+                "total_debt": "-",
+                "debt_service": "-",
+            }
+        }
+        if desc_col_name not in df_data.columns or not period_cols:
+            return extracted
+
+        patterns = {
+            "revenue": [
+                "total pendapatan", "jumlah pendapatan", "pendapatan usaha", "pendapatan neto",
+                "pendapatan bersih", "pendapatan", "penjualan bersih", "penjualan neto",
+                "penjualan", "revenue", "sales", "omzet", "penerimaan kas dari pelanggan",
+                "penerimaan dari pelanggan", "penerimaan pelanggan"
+            ],
+            "current_liabilities": [
+                "total liabilitas lancar", "jumlah liabilitas lancar", "liabilitas lancar",
+                "total liabilitas jangka pendek", "jumlah liabilitas jangka pendek",
+                "liabilitas jangka pendek", "utang lancar", "utang jangka pendek",
+                "kewajiban lancar", "kewajiban jangka pendek", "current liabilities", "current liability"
+            ],
+            "total_debt": [
+                "total utang", "jumlah utang", "total liabilitas", "jumlah liabilitas",
+                "total kewajiban", "jumlah kewajiban", "utang berbunga", "pinjaman jangka panjang",
+                "pinjaman jangka pendek", "pinjaman bank", "utang bank", "pinjaman",
+                "obligasi", "sukuk", "total debt", "total liabilities"
+            ],
+            "debt_service": [
+                "pembayaran pokok utang", "pembayaran utang", "pelunasan utang", "pelunasan pinjaman",
+                "pembayaran pinjaman", "pembayaran kembali pinjaman", "pembayaran liabilitas sewa",
+                "bunga dibayar", "pembayaran bunga", "beban bunga", "biaya keuangan", "angsuran"
+            ],
+        }
+
+        matched = {k: [] for k in ["revenue", "current_liabilities", "total_debt", "debt_service"]}
+        for _, r in df_data.iterrows():
+            raw_txt = str(r[desc_col_name]).strip()
+            txt = raw_txt.lower()
+            if not txt or txt in ("nan", "none"):
+                continue
+            for key, pats in patterns.items():
+                if any(pat in txt for pat in pats):
+                    row_total = sum(abs(to_number(r[p])) for p in period_cols if p in df_data.columns)
+                    if row_total > 0:
+                        matched[key].append((row_total, raw_txt))
+
+        for key in matched:
+            if matched[key]:
+                best_val, best_label = max(matched[key], key=lambda item: item[0])
+                extracted[key] = float(best_val)
+                extracted["sources"][key] = best_label
+
+        # Fallback debt_service dari pos arus kas keluar terkait pinjaman/bunga/sewa jika tidak ada baris ringkasan
+        if extracted["debt_service"] == 0.0 and line_items:
+            ds_items = [
+                (abs(float(x.get("Nilai", 0.0))), str(x.get("Uraian", "")))
+                for x in line_items
+                if any(k in str(x.get("Uraian", "")).lower() for k in [
+                    "pinjaman", "utang bank", "obligasi", "bunga", "sewa pembiayaan", "liabilitas sewa", "angsuran"
+                ])
+                and float(x.get("Nilai", 0.0)) < 0
+            ]
+            if ds_items:
+                extracted["debt_service"] = float(sum(v for v, _ in ds_items))
+                extracted["sources"]["debt_service"] = ", ".join(dict.fromkeys(lbl for _, lbl in ds_items[:3]))
+
+        return extracted
+
     def make_cf_excel(statement_df, ratios, summary, trend_df=None, anomalies=None):
         buff = io.BytesIO()
         with pd.ExcelWriter(buff, engine="openpyxl") as writer:
@@ -1205,28 +1290,69 @@ def page_cash_flow():
                         st.dataframe(pd.DataFrame(all_unclassified), use_container_width=True, hide_index=True)
                 st.caption("Pengelompokan otomatis menggunakan uraian akun. Tinjau kembali klasifikasi setiap baris sebelum memakai hasil sebagai laporan resmi.")
             with t2:
-                st.markdown("Rasio yang dapat dihitung dari laporan arus kas dan data pendukung yang tersedia:")
-                revenue_default = extract_revenue_default(data, desc_col, periods)
-                c1, c2 = st.columns(2)
-                revenue = c1.number_input("Pendapatan / Penjualan (Rp)", min_value=0.0, value=float(max(0.0, revenue_default)), key="cf_stmt_revenue_all")
-                current_liabilities = c2.number_input("Liabilitas Lancar (Rp)", min_value=0.0, value=0.0, key="cf_stmt_current_liab_all")
-                c3, c4 = st.columns(2)
-                total_debt = c3.number_input("Total Utang (Rp)", min_value=0.0, value=0.0, key="cf_stmt_total_debt_all")
-                debt_service = c4.number_input("Pembayaran Pokok Utang + Bunga (Rp)", min_value=0.0, value=0.0, key="cf_stmt_debt_service_all")
+                st.markdown("#### 📐 Rasio Keuangan Arus Kas (Otomatis dari File)")
+                auto_inputs = extract_cf_ratio_inputs(data, desc_col, periods, all_lines)
+                revenue = auto_inputs["revenue"]
+                current_liabilities = auto_inputs["current_liabilities"]
+                total_debt = auto_inputs["total_debt"]
+                debt_service = auto_inputs["debt_service"]
+                srcs = auto_inputs["sources"]
                 total_fcf = sum(saved["results"][p]["fcf"] for p in periods)
+
                 ratios = {
-                    "Cash Flow Margin (%)": round(total_cfo / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia",
-                    "Operating Cash Flow Ratio (x)": round(total_cfo / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia",
-                    "Cash Flow to Debt Ratio (%)": round(total_cfo / total_debt * 100, 2) if total_debt > 0 else "Data total utang tidak tersedia",
-                    "Cash Flow Coverage (x)": round(total_cfo / debt_service, 2) if debt_service > 0 else "Data pembayaran utang dan bunga tidak tersedia",
+                    "Cash Flow Margin (%)": round(total_cfo / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia di file",
+                    "Operating Cash Flow Ratio (x)": round(total_cfo / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia di file",
+                    "Cash Flow to Debt Ratio (%)": round(total_cfo / total_debt * 100, 2) if total_debt > 0 else "Data total utang tidak tersedia di file",
+                    "Cash Flow Coverage (x)": round(total_cfo / debt_service, 2) if debt_service > 0 else "Data pembayaran utang dan bunga tidak tersedia di file",
                     "Free Cash Flow (Rp)": total_fcf,
                 }
-                for label, val in ratios.items():
-                    if isinstance(val, (int, float)):
-                        metric_card(label, format_rupiah(val) if "(Rp)" in label else f"{val:.2f}" + (" %" if "%" in label else " x"))
-                    else:
-                        st.info(f"{label}: {val}")
-                st.caption("Masukkan data pendukung dari laporan laba rugi dan laporan posisi keuangan. Rasio hanya dihitung jika pembaginya tersedia dan lebih besar dari nol.")
+
+                ratio_cards_meta = [
+                    ("Free Cash Flow (Rp)", ratios["Free Cash Flow (Rp)"], "Kas Neto Operasi − Belanja Modal (CapEx)",
+                     "Surplus Kas Bebas" if total_fcf >= 0 else "Defisit Kas Bebas", "badge-ok" if total_fcf >= 0 else "badge-warn"),
+                    ("Cash Flow Margin (%)", ratios["Cash Flow Margin (%)"], f"Sumber: {srcs['revenue']}" if revenue > 0 else "Butuh pos Pendapatan / Penerimaan Pelanggan di file",
+                     "Efisien" if isinstance(ratios["Cash Flow Margin (%)"], float) and ratios["Cash Flow Margin (%)"] >= 10 else "Perlu Perhatian",
+                     "badge-ok" if isinstance(ratios["Cash Flow Margin (%)"], float) and ratios["Cash Flow Margin (%)"] >= 10 else "badge-warn"),
+                    ("Operating Cash Flow Ratio (x)", ratios["Operating Cash Flow Ratio (x)"], f"Sumber: {srcs['current_liabilities']}" if current_liabilities > 0 else "Butuh pos Liabilitas Lancar di file",
+                     "Likuid (≥ 1.0x)" if isinstance(ratios["Operating Cash Flow Ratio (x)"], float) and ratios["Operating Cash Flow Ratio (x)"] >= 1.0 else "Ketat (< 1.0x)",
+                     "badge-ok" if isinstance(ratios["Operating Cash Flow Ratio (x)"], float) and ratios["Operating Cash Flow Ratio (x)"] >= 1.0 else "badge-warn"),
+                    ("Cash Flow to Debt Ratio (%)", ratios["Cash Flow to Debt Ratio (%)"], f"Sumber: {srcs['total_debt']}" if total_debt > 0 else "Butuh pos Total Utang / Liabilitas di file",
+                     "Sehat (≥ 20%)" if isinstance(ratios["Cash Flow to Debt Ratio (%)"], float) and ratios["Cash Flow to Debt Ratio (%)"] >= 20 else "Leverage Tinggi",
+                     "badge-ok" if isinstance(ratios["Cash Flow to Debt Ratio (%)"], float) and ratios["Cash Flow to Debt Ratio (%)"] >= 20 else "badge-warn"),
+                    ("Cash Flow Coverage (x)", ratios["Cash Flow Coverage (x)"], f"Sumber: {srcs['debt_service']}" if debt_service > 0 else "Butuh pos Pembayaran Pokok Utang / Bunga di file",
+                     "Aman (≥ 1.5x)" if isinstance(ratios["Cash Flow Coverage (x)"], float) and ratios["Cash Flow Coverage (x)"] >= 1.5 else "Ketat (< 1.5x)",
+                     "badge-ok" if isinstance(ratios["Cash Flow Coverage (x)"], float) and ratios["Cash Flow Coverage (x)"] >= 1.5 else "badge-warn"),
+                ]
+
+                col_left, col_right = st.columns(2)
+                for idx_card, (r_label, r_val, r_sub, badge_txt, badge_cls) in enumerate(ratio_cards_meta):
+                    target_col = col_left if idx_card % 2 == 0 else col_right
+                    with target_col:
+                        if isinstance(r_val, (int, float)):
+                            formatted_val = format_rupiah(r_val) if "(Rp)" in r_label else f"{r_val:.2f}" + (" %" if "%" in r_label else " x")
+                            st.markdown(f"""
+                            <div class="ratio-card">
+                                <div class="ratio-title">{r_label} <span class="{badge_cls}">{badge_txt}</span></div>
+                                <div class="ratio-val">{formatted_val}</div>
+                                <p class="ratio-sub">{r_sub}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"""
+                            <div class="ratio-card-muted">
+                                <div class="ratio-title">{r_label} <span class="badge-na">Belum Tersedia</span></div>
+                                <div class="ratio-val" style="font-size:16px; color:#8A6D77;">{r_val}</div>
+                                <p class="ratio-sub">{r_sub}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                with st.expander("🔍 Detail Akun & Komponen Terdeteksi Otomatis dari File", expanded=False):
+                    st.dataframe(pd.DataFrame([
+                        {"Komponen Pendukung": "Pendapatan / Penjualan", "Akun Terdeteksi": srcs["revenue"], "Nilai (Rp)": format_rupiah(revenue) if revenue > 0 else "-"},
+                        {"Komponen Pendukung": "Liabilitas Lancar", "Akun Terdeteksi": srcs["current_liabilities"], "Nilai (Rp)": format_rupiah(current_liabilities) if current_liabilities > 0 else "-"},
+                        {"Komponen Pendukung": "Total Utang / Liabilitas", "Akun Terdeteksi": srcs["total_debt"], "Nilai (Rp)": format_rupiah(total_debt) if total_debt > 0 else "-"},
+                        {"Komponen Pendukung": "Pembayaran Pokok Utang + Bunga", "Akun Terdeteksi": srcs["debt_service"], "Nilai (Rp)": format_rupiah(debt_service) if debt_service > 0 else "-"},
+                    ]), use_container_width=True, hide_index=True)
             with t3:
                 trend_rows = []
                 for p in periods:
@@ -1456,24 +1582,56 @@ def page_cash_flow():
                                    color_discrete_sequence=["#FF5C8B"]), use_container_width=True)
             st.caption("Klasifikasi otomatis berdasarkan kata kunci pada keterangan/kategori. Periksa dan koreksi kategori bila diperlukan.")
         with tab_ratios:
-            rc1, rc2 = st.columns(2)
-            revenue = rc1.number_input("Pendapatan / Penjualan (Rp)", min_value=0.0, value=0.0, key="cf_tx_revenue")
-            current_liabilities = rc2.number_input("Liabilitas Lancar (Rp)", min_value=0.0, value=0.0, key="cf_tx_current_liab")
-            rc3, rc4 = st.columns(2)
-            total_debt = rc3.number_input("Total Utang (Rp)", min_value=0.0, value=0.0, key="cf_tx_total_debt")
-            debt_service = rc4.number_input("Pembayaran Pokok Utang + Bunga (Rp)", min_value=0.0, value=0.0, key="cf_tx_debt_service")
+            st.markdown("#### 📐 Rasio Keuangan Arus Kas (Otomatis dari Transaksi)")
+            tx_df = res["df"]
+            tx_desc = tx_df["_keterangan"].astype(str).str.lower()
+            revenue = float(tx_df[tx_desc.str.contains("pendapatan|penjualan|revenue|omzet|pelanggan", na=False)]["_kas_masuk"].sum())
+            current_liabilities = float(tx_df[tx_desc.str.contains("liabilitas lancar|liabilitas jangka pendek|utang lancar|kewajiban lancar", na=False)]["_kas_keluar"].sum())
+            total_debt = float(tx_df[tx_desc.str.contains("total utang|total liabilitas|pinjaman|utang bank|obligasi", na=False)]["_kas_keluar"].sum())
+            debt_service = float(tx_df[tx_desc.str.contains("pinjaman|utang bank|obligasi|bunga|angsuran|pelunasan", na=False)]["_kas_keluar"].sum())
             ratios = {
-                "Cash Flow Margin (%)": round(res["totals"]["Operasi"] / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia",
-                "Operating Cash Flow Ratio (x)": round(res["totals"]["Operasi"] / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia",
-                "Cash Flow to Debt Ratio (%)": round(res["totals"]["Operasi"] / total_debt * 100, 2) if total_debt > 0 else "Data total utang tidak tersedia",
-                "Cash Flow Coverage (x)": round(res["totals"]["Operasi"] / debt_service, 2) if debt_service > 0 else "Data pembayaran utang dan bunga tidak tersedia",
+                "Cash Flow Margin (%)": round(res["totals"]["Operasi"] / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia di file",
+                "Operating Cash Flow Ratio (x)": round(res["totals"]["Operasi"] / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia di file",
+                "Cash Flow to Debt Ratio (%)": round(res["totals"]["Operasi"] / total_debt * 100, 2) if total_debt > 0 else "Data total utang tidak tersedia di file",
+                "Cash Flow Coverage (x)": round(res["totals"]["Operasi"] / debt_service, 2) if debt_service > 0 else "Data pembayaran utang dan bunga tidak tersedia di file",
                 "Free Cash Flow (Rp)": res["fcf"]
             }
-            for ratio_name, ratio_value in ratios.items():
-                if isinstance(ratio_value, (int, float)):
-                    metric_card(ratio_name, format_rupiah(ratio_value) if "(Rp)" in ratio_name else f"{ratio_value:.2f}" + (" %" if "%" in ratio_name else " x"))
-                else:
-                    st.info(f"{ratio_name}: {ratio_value}")
+            tx_cards = [
+                ("Free Cash Flow (Rp)", ratios["Free Cash Flow (Rp)"], "Arus Kas Operasi − Belanja Modal (CapEx)",
+                 "Surplus" if res["fcf"] >= 0 else "Defisit", "badge-ok" if res["fcf"] >= 0 else "badge-warn"),
+                ("Cash Flow Margin (%)", ratios["Cash Flow Margin (%)"], "Dihitung dari transaksi penerimaan penjualan/pelanggan",
+                 "Efisien" if isinstance(ratios["Cash Flow Margin (%)"], float) and ratios["Cash Flow Margin (%)"] >= 10 else "Perlu Perhatian",
+                 "badge-ok" if isinstance(ratios["Cash Flow Margin (%)"], float) and ratios["Cash Flow Margin (%)"] >= 10 else "badge-warn"),
+                ("Operating Cash Flow Ratio (x)", ratios["Operating Cash Flow Ratio (x)"], "Dihitung dari pembayaran liabilitas jangka pendek",
+                 "Likuid" if isinstance(ratios["Operating Cash Flow Ratio (x)"], float) and ratios["Operating Cash Flow Ratio (x)"] >= 1.0 else "Ketat",
+                 "badge-ok" if isinstance(ratios["Operating Cash Flow Ratio (x)"], float) and ratios["Operating Cash Flow Ratio (x)"] >= 1.0 else "badge-warn"),
+                ("Cash Flow to Debt Ratio (%)", ratios["Cash Flow to Debt Ratio (%)"], "Dihitung dari transaksi terkait utang/pinjaman",
+                 "Sehat" if isinstance(ratios["Cash Flow to Debt Ratio (%)"], float) and ratios["Cash Flow to Debt Ratio (%)"] >= 20 else "Leverage Tinggi",
+                 "badge-ok" if isinstance(ratios["Cash Flow to Debt Ratio (%)"], float) and ratios["Cash Flow to Debt Ratio (%)"] >= 20 else "badge-warn"),
+                ("Cash Flow Coverage (x)", ratios["Cash Flow Coverage (x)"], "Dihitung dari pembayaran pokok utang, bunga, & angsuran",
+                 "Aman" if isinstance(ratios["Cash Flow Coverage (x)"], float) and ratios["Cash Flow Coverage (x)"] >= 1.5 else "Ketat",
+                 "badge-ok" if isinstance(ratios["Cash Flow Coverage (x)"], float) and ratios["Cash Flow Coverage (x)"] >= 1.5 else "badge-warn"),
+            ]
+            tc1, tc2 = st.columns(2)
+            for idx_c, (r_label, r_val, r_sub, b_txt, b_cls) in enumerate(tx_cards):
+                with (tc1 if idx_c % 2 == 0 else tc2):
+                    if isinstance(r_val, (int, float)):
+                        fmt_v = format_rupiah(r_val) if "(Rp)" in r_label else f"{r_val:.2f}" + (" %" if "%" in r_label else " x")
+                        st.markdown(f"""
+                        <div class="ratio-card">
+                            <div class="ratio-title">{r_label} <span class="{b_cls}">{b_txt}</span></div>
+                            <div class="ratio-val">{fmt_v}</div>
+                            <p class="ratio-sub">{r_sub}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div class="ratio-card-muted">
+                            <div class="ratio-title">{r_label} <span class="badge-na">Belum Tersedia</span></div>
+                            <div class="ratio-val" style="font-size:16px; color:#8A6D77;">{r_val}</div>
+                            <p class="ratio-sub">{r_sub}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
             st.metric("Rata-rata Pengeluaran Operasi per Bulan", format_rupiah(res["avg_operating_outflow"]))
             st.markdown("**Rumus yang digunakan jika data tersedia:**")
             st.markdown(
@@ -1674,3 +1832,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+Diproses dan dianalisis dalam kode
