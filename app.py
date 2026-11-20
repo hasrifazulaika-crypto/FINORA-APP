@@ -192,7 +192,7 @@ def auto_detect_columns(df):
     for col in df.columns:
         sample = df[col].dropna().astype(str).head(20)
         if sample.empty: continue
-        if not mapping["date"] and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5: mapping["date"] = col
+        if not mapping["date"] and pd.to_datetime(sample, errors='coerce', dayfirst=True).notna().sum() > len(sample) * 0.5: mapping["date"] = col
         elif not mapping["amount"] and col != mapping["date"] and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5: mapping["amount"] = col
     if not mapping["date"] and len(df.columns) > 0: mapping["date"] = df.columns[0]
     if not mapping["amount"] and len(df.columns) > 1: mapping["amount"] = df.columns[1]
@@ -242,7 +242,7 @@ def audit_weekend(df, date_col):
     findings, flagged = [], pd.DataFrame()
     if date_col:
         try:
-            dates = pd.to_datetime(df[date_col], errors="coerce")
+            dates = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
             flagged = df[dates.dt.dayofweek >= 5]
             if not flagged.empty:
                 findings.append({"module": "Transaksi Weekend", "risk_level": "Tinggi", "title": f"{len(flagged)} transaksi di hari Sabtu/Minggu", "detail": "Transaksi di luar hari kerja.", "recommendation": "Periksa otorisasi transaksi akhir pekan."})
@@ -716,11 +716,13 @@ def page_cash_flow():
         for c in df_cf.columns:
             sample = df_cf[c].dropna().head(20).astype(str)
             if sample.empty: continue
-            if not auto_tgl and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5: auto_tgl = c
-            elif not auto_nom and c != auto_tgl and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5: auto_nom = c
+            if not auto_tgl and pd.to_datetime(sample, errors='coerce', dayfirst=True).notna().sum() > len(sample) * 0.5: auto_tgl = c
+            elif not auto_nom and c != auto_tgl:
+                parsed_nums = sample.apply(clean_currency)
+                if (parsed_nums != 0).sum() > len(sample) * 0.5: auto_nom = c
                 
-        if not auto_tgl: auto_tgl = df_cf.columns[0]
-        if not auto_nom: auto_nom = df_cf.columns[1] if len(df_cf.columns) > 1 else df_cf.columns[0]
+        if not auto_tgl and len(df_cf.columns) > 0: auto_tgl = df_cf.columns[0]
+        if not auto_nom and len(df_cf.columns) > 1: auto_nom = df_cf.columns[1]
         if not auto_ket:
             for c in df_cf.columns:
                 if c not in [auto_tgl, auto_nom]: auto_ket = c; break
@@ -730,42 +732,54 @@ def page_cash_flow():
         
         with st.expander("⚙️ Lihat / Koreksi Pemetaan Kolom", expanded=False):
             c3, c4, c5 = st.columns(3)
-            col_tgl = c3.selectbox("Kolom Tanggal", list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl))
+            col_tgl = c3.selectbox("Kolom Tanggal", list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl) if auto_tgl in list(df_cf.columns) else 0)
             col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket in list(df_cf.columns) else 0)
-            col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom))
-        
-        df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce')
-        df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
-        
-        df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
-        
-        if col_ket:
-            df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
-        else:
-            df_cf['Kategori'] = 'Lainnya'
+            col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom) if auto_nom in list(df_cf.columns) else 0)
             
-        st.info(f"📊 Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
-        
-        # --- BAGIAN PENGATURAN SALDO AWAL DIHAPUS ---
-        # Langsung tombol jalankan analisis
-        if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
-            with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
-                # Running balance mulai dari 0 (hanya menghitung net flow dari data excel)
-                df_cf['Running Balance'] = df_cf[col_nom].cumsum() 
-                total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
-                total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
-                saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else 0
+        # Proses Data
+        try:
+            df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce', dayfirst=True)
+            df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
+            
+            # Tampilkan preview agar user tahu terbaca atau tidak
+            with st.expander("👀 Preview Data yang Terbaca (Buka jika hasil 0)", expanded=False):
+                st.write("Pastikan kolom **Tanggal** dan **Nominal** sudah sesuai. Jika nominal bernilai 0, berarti format angka di Excel tidak dikenali.")
+                preview_cols = [col_tgl, col_nom]
+                if col_ket: preview_cols.insert(1, col_ket)
+                st.dataframe(df_cf[preview_cols].head(10))
+
+            df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
+            
+            if df_cf.empty:
+                st.error("❌ Gagal memproses data: Kolom Tanggal kosong atau format tidak dikenali. Coba ubah 'Header di baris ke-' atau koreksi Pemetaan Kolom.")
+                st.stop()
                 
-                bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
-                burn_rate = abs(total_keluar) / bulan_unik
-                bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
+            if col_ket:
+                df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
+            else:
+                df_cf['Kategori'] = 'Lainnya'
                 
-                st.session_state['cf_results'] = {
-                    "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
-                    "total_masuk": total_masuk, "total_keluar": total_keluar, 
-                    "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
-                    "bulan_bertahan": bulan_bertahan
-                }
+            st.info(f"📊 Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
+            
+            if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
+                with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
+                    df_cf['Running Balance'] = df_cf[col_nom].cumsum() 
+                    total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
+                    total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
+                    saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else 0
+                    
+                    bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
+                    burn_rate = abs(total_keluar) / bulan_unik
+                    bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
+                    
+                    st.session_state['cf_results'] = {
+                        "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
+                        "total_masuk": total_masuk, "total_keluar": total_keluar, 
+                        "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
+                        "bulan_bertahan": bulan_bertahan
+                    }
+        except Exception as e:
+            st.error(f"Terjadi kesalahan saat memproses kolom: {e}")
 
     if 'cf_results' in st.session_state:
         res_cf = st.session_state['cf_results']
