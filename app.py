@@ -911,6 +911,26 @@ def page_cash_flow():
         inferred = guess_line_activity(s_clean)
         return current_section, inferred
 
+    def extract_revenue_default(df_data, desc_col_name, period_cols):
+        if desc_col_name not in df_data.columns or not period_cols:
+            return 0.0
+        patterns = [
+            "pendapatan", "penjualan", "revenue", "omzet",
+            "penerimaan kas dari pelanggan", "penerimaan dari pelanggan"
+        ]
+        matched_vals = []
+        for _, r in df_data.iterrows():
+            txt = str(r[desc_col_name]).lower()
+            if any(pat in txt for pat in patterns):
+                for p in period_cols:
+                    if p in df_data.columns:
+                        num = abs(to_number(r[p]))
+                        if num > 0:
+                            matched_vals.append(num)
+        if matched_vals:
+            return float(max(matched_vals))
+        return 0.0
+
     def make_cf_excel(statement_df, ratios, summary, trend_df=None, anomalies=None):
         buff = io.BytesIO()
         with pd.ExcelWriter(buff, engine="openpyxl") as writer:
@@ -1186,10 +1206,9 @@ def page_cash_flow():
                 st.caption("Pengelompokan otomatis menggunakan uraian akun. Tinjau kembali klasifikasi setiap baris sebelum memakai hasil sebagai laporan resmi.")
             with t2:
                 st.markdown("Rasio yang dapat dihitung dari laporan arus kas dan data pendukung yang tersedia:")
-                revenue_rows = data[data[desc_col].astype(str).str.contains("pendapatan|penjualan|revenue", case=False, na=False)]
-                revenue_default = sum(to_number(revenue_rows.iloc[0][p]) for p in periods) if not revenue_rows.empty else 0.0
+                revenue_default = extract_revenue_default(data, desc_col, periods)
                 c1, c2 = st.columns(2)
-                revenue = c1.number_input("Pendapatan / Penjualan (Rp)", min_value=0.0, value=float(max(0, revenue_default)), key="cf_stmt_revenue_all")
+                revenue = c1.number_input("Pendapatan / Penjualan (Rp)", min_value=0.0, value=float(max(0.0, revenue_default)), key="cf_stmt_revenue_all")
                 current_liabilities = c2.number_input("Liabilitas Lancar (Rp)", min_value=0.0, value=0.0, key="cf_stmt_current_liab_all")
                 c3, c4 = st.columns(2)
                 total_debt = c3.number_input("Total Utang (Rp)", min_value=0.0, value=0.0, key="cf_stmt_total_debt_all")
