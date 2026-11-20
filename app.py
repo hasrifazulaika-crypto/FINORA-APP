@@ -1845,27 +1845,393 @@ def page_cash_flow():
             use_container_width=True
         )
 
+def _get_finora_study_materials():
+    """Mengembalikan 75 materi pembelajaran lengkap (25 per analisis: Audit, Keuangan, Arus Kas)."""
+    audit_25 = [
+        ("A-01", "Dasar", "Apa itu Audit dan Mengapa Penting?",
+         "Audit adalah pemeriksaan sistematis dan objektif atas bukti asersi ekonomi untuk menilai kesesuaiannya dengan kriteria (PSAK/SAP/SOP).",
+         "Mengurangi asimetri informasi antara manajemen dan pemangku kepentingan, meningkatkan kredibilitas laporan, serta mendeteksi salah saji atau kecurangan.",
+         "Verifikasi bukti transaksi sebelum menerbitkan opini atau laporan evaluasi."),
+        ("A-02", "Dasar", "Jenis-Jenis Audit: Keuangan, Operasional, Kepatuhan & Forensik",
+         "Audit keuangan menilai kewajaran laporan; audit operasional menilai efisiensi/efektivitas; audit kepatuhan menilai ketaatan aturan; audit forensik menyelidiki indikasi fraud.",
+         "Setiap jenis audit memiliki tujuan, kriteria, dan output berbeda sehingga auditor tidak mencampuradukkan fokus pengujian.",
+         "Sesuaikan prosedur pengujian dengan tujuan penugasan (kewajaran saldo vs efisiensi proses)."),
+        ("A-03", "Dasar", "Asersi Manajemen dalam Laporan Keuangan",
+         "Pernyataan tersurat atau tersirat manajemen atas pos laporan: Keberadaan/Keterjadian, Kelengkapan, Hak & Kewajiban, Penilaian/Alokasi, Penyajian & Pengungkapan.",
+         "Membantu auditor menerjemahkan risiko salah saji menjadi prosedur pengujian yang tepat sasaran.",
+         "Uji transaksi fiktif untuk asersi keterjadian; uji cut-off & unrecorded liabilities untuk kelengkapan."),
+        ("A-04", "Dasar", "5 Jenis Opini Audit atas Laporan Keuangan",
+         "Wajar Tanpa Modifikasian (WTP), Wajar dengan Pengecualian (WDP), Tidak Wajar (Adverse), Tidak Menyatakan Pendapat (Disclaimer), dan Paragraf Penekanan Suatu Hal.",
+         "Mencerminkan tingkat kewajaran penyajian dan kecukupan bukti audit yang diperoleh auditor.",
+         "Evaluasi materialitas (pervasif vs terisolasi) dan kecukupan bukti sebelum menentukan opini."),
+        ("A-05", "Dasar", "Bukti Audit: Kompetensi, Kecukupan & Hirarki Keandalan",
+         "Bukti audit harus cukup (kuantitas) dan tepat/kompeten (relevansi & keandalan). Bukti eksternal independen lebih andal daripada bukti internal.",
+         "Menghindari kesimpulan audit yang lemah akibat mengandalkan dokumen internal tanpa verifikasi silang.",
+         "Prioritaskan konfirmasi pihak ketiga, rekening koran asli, dan faktur/dokumen pendukung sumber."),
+        ("A-06", "Menengah", "Pengendalian Intern (Internal Control - COSO)",
+         "Proses yang dirancang dewan, manajemen, dan personel untuk memberikan keyakinan memadai atas keandalan pelaporan, efektivitas operasi, dan kepatuhan.",
+         "Pengendalian intern yang lemah meningkatkan risiko salah saji material dan peluang kecurangan.",
+         "Petakan pemisahan tugas (segregation of duties), otorisasi, dan rekonsiliasi rutin."),
+        ("A-07", "Menengah", "Risiko Audit: Inherent Risk, Control Risk & Detection Risk",
+         "Audit Risk (AR) = Inherent Risk (IR) × Control Risk (CR) × Detection Risk (DR). Auditor mengendalikan DR agar AR tetap pada tingkat rendah.",
+         "Memfokuskan waktu dan sumber daya audit pada akun berisiko tinggi seperti kas, estimasi, dan transaksi non-rutin.",
+         "Tingkatkan ukuran sampel dan uji substantif bila IR dan CR dinilai tinggi."),
+        ("A-08", "Menengah", "Materialitas dalam Perencanaan & Evaluasi Audit",
+         "Besaran salah saji atau kelalaian yang secara wajar dapat memengaruhi keputusan ekonomi pengguna laporan keuangan (Overall, Performance, dan Trivial Materiality).",
+         "Menentukan batas toleransi salah saji dan menilai apakah temuan bersifat material secara individual maupun agregat.",
+         "Gunakan tolok ukur yang relevan (pendapatan, aset, atau laba normal) dan dokumentasikan dasarnya."),
+        ("A-09", "Menengah", "Teknik Sampling Audit: Statistik vs Judgmental",
+         "Sampling memungkinkan pengujian populasi besar secara efisien melalui random sampling, systematic/interval sampling, monetary unit sampling, atau judgmental sampling.",
+         "Memberikan dasar rasional untuk menarik kesimpulan populasi tanpa memeriksa 100% transaksi rutin.",
+         "Pisahkan pos bernilai tinggi/tidak wajar (100% uji) dari populasi rutin yang di-sampling."),
+        ("A-10", "Menengah", "Kertas Kerja Audit (KKA) & Dokumentasi Bukti",
+         "Catatan tertulis prosedur audit yang diterapkan, pengujian yang dilakukan, bukti yang diperoleh, dan kesimpulan auditor (tujuan, kondisi, kriteria, sebab, akibat, rekomendasi).",
+         "Menjadi dasar pembelaan profesional, supervisi tim, dan pertanggungjawaban mutu penugasan audit.",
+         "Susun KKA yang runtut, tertaut ke bukti/data flagged, dan memuat rekomendasi yang dapat ditindaklanjuti."),
+        ("A-11", "Menengah", "Deteksi Duplikasi Transaksi & Double Posting",
+         "Identifikasi transaksi yang muncul berulang dengan kombinasi tanggal, nominal, keterangan, atau nomor faktur/referensi yang identik atau sangat mirip.",
+         "Duplikasi input dapat menggelembungkan biaya, aset, atau pembayaran ganda kepada vendor.",
+         "Saring transaksi kembar dan verifikasi apakah memang terjadi transaksi terpisah atau salah input."),
+        ("A-12", "Menengah", "Analisis Outlier Nominal (Metode IQR & Z-Score)",
+         "Outlier adalah nilai ekstrem di luar rentang kewajaran statistik, misalnya di bawah Q1 - 1,5×IQR atau di atas Q3 + 1,5×IQR.",
+         "Menangkap transaksi bernilai tidak lazim yang berpotensi salah catat desimal/nol, mark-up, atau transaksi khusus.",
+         "Tinjau seluruh transaksi di luar pagar IQR dan cocokkan dengan kontrak atau bukti pendukung."),
+        ("A-13", "Menengah", "Pengujian Kelengkapan Data (Missing Values & Blank Fields)",
+         "Pemeriksaan field wajib seperti tanggal, nominal, akun/kategori, atau nomor referensi yang kosong atau tidak valid.",
+         "Data kosong menunjukkan lemahnya validasi sistem input atau potensi penghilangan jejak transaksi.",
+         "Lengkapi data yang hilang dari sumber transaksi asli sebelum kesimpulan akhir diambil."),
+        ("A-14", "Menengah", "Observasi Nilai Negatif & Transaksi Retur/Koreksi",
+         "Identifikasi nominal minus pada kolom pengeluaran, pendapatan, atau saldo yang seharusnya positif atau memiliki aturan tanda khusus.",
+         "Nilai negatif bisa merupakan retur sah, reklasifikasi, atau koreksi/penyesuaian yang perlu otorisasi memadai.",
+         "Pastikan setiap nilai negatif didukung nota retur, memo kredit, atau jurnal koreksi yang disetujui."),
+        ("A-15", "Menengah", "Analisis Transaksi di Luar Hari Kerja (Weekend / Hari Libur)",
+         "Penelusuran transaksi yang tercatat pada hari Sabtu, Minggu, atau hari libur resmi.",
+         "Transaksi akhir pekan dapat mengindikasikan bypass kontrol harian, lemahnya pengawasan, atau jurnal penyesuaian tak wajar.",
+         "Cek otorisasi, waktu posting sistem, dan alasan bisnis transaksi pada akhir pekan."),
+        ("A-16", "Menengah", "Pencarian Kata Kunci Mencurigakan (Adjustment, Void, Koreksi)",
+         "Pemindaian keterangan/uraian transaksi untuk kata kunci seperti adjustment, adj, void, koreksi, manual, atau write-off.",
+         "Jurnal manual dan penyesuaian akhir periode memiliki risiko manipulasi atau koreksi kesalahan yang lebih tinggi.",
+         "Minta alasan tertulis dan dokumen pendukung sah untuk setiap jurnal penyesuaian/pembatalan."),
+        ("A-17", "Menengah", "Pengujian Overbudget (Realisasi Melebihi Anggaran/Pagu)",
+         "Perbandingan realisasi aktual dengan pagu anggaran per pos/akun untuk menemukan pos yang melewati batas anggaran.",
+         "Overbudget dapat menandakan pengendalian anggaran yang lemah, perubahan ruang lingkup tanpa revisi, atau pemborosan.",
+         "Klarifikasi penyebab selisih anggaran dan cek persetujuan revisi pagu yang berwenang."),
+        ("A-18", "Lanjutan", "Fraud Triangle & Red Flags Kecurangan Keuangan",
+         "Tiga unsur pendorong fraud: Tekanan/Insentif (Pressure), Kesempatan (Opportunity), dan Rasionalisasi (Rationalization).",
+         "Membantu auditor membaca pola perilaku dan celah sistem yang sering muncul sebelum kecurangan terungkap.",
+         "Fokuskan pengujian tambahan pada area dengan tekanan target tinggi dan kontrol lemah."),
+        ("A-19", "Lanjutan", "Pengujian Cut-Off (Pisah Batas Periode)",
+         "Memastikan transaksi dan peristiwa dicatat pada periode akuntansi yang tepat sesuai penyerahan barang/jasa atau terjadinya kewajiban.",
+         "Kesalahan cut-off menggeser pendapatan atau beban antarperiode sehingga laba dan posisi keuangan terdistorsi.",
+         "Uji transaksi beberapa hari sebelum dan sesudah tanggal tutup buku terhadap bukti pengiriman/penerimaan."),
+        ("A-20", "Lanjutan", "Prosedur Analitis Substantif & Ekspektasi Auditor",
+         "Perbandingan angka keuangan dengan ekspektasi auditor berbasis tren historis, anggaran, data non-keuangan, atau rasio industri.",
+         "Mengungkap fluktuasi tidak biasa atau hubungan yang tidak konsisten antarpos laporan keuangan.",
+         "Tetapkan ambang selisih yang material dan selidiki varians yang menyimpang dari ekspektasi."),
+        ("A-21", "Lanjutan", "Audit Kas & Rekonsiliasi Bank",
+         "Pengujian saldo kas di tangan dan kas di bank melalui cash opname, konfirmasi bank, serta penelusuran item rekonsiliasi (deposit in transit, outstanding checks).",
+         "Kas merupakan akun paling likuid dan paling rentan terhadap pencurian, lapping, atau window dressing.",
+         "Telusuri pos rekonsiliasi lama/tidak wajar dan pastikan tidak ada cek beredar fiktif."),
+        ("A-22", "Lanjutan", "Audit Piutang, Cadangan Kerugian & Penagihan",
+         "Pengujian eksistensi piutang, ketepatan umur piutang (aging), dan kewajaran cadangan kerugian kredit ekspektasian.",
+         "Piutang tak tertagih yang tidak dicadangkan atau penjualan fiktif dapat melebihsajikan aset dan laba.",
+         "Lakukan konfirmasi saldo pelanggan, uji penerimaan kas setelah tanggal pelaporan, dan tinjau piutang macet."),
+        ("A-23", "Lanjutan", "Audit Persediaan, Opname Fisik & Penilaian (NRV)",
+         "Pengujian keberadaan, kuantitas, kepemilikan, dan penilaian persediaan pada nilai terendah antara biaya perolehan dan nilai realisasi neto.",
+         "Barang usang/rusak atau kesalahan perhitungan fisik dapat mendistorsi HPP dan nilai persediaan.",
+         "Amati stock opname, uji item bernilai tinggi/bergerak lambat, dan cek penurunan nilai persediaan."),
+        ("A-24", "Lanjutan", "Audit Liabilitas & Pencarian Kewajiban yang Belum Tercatat",
+         "Memastikan seluruh utang usaha, akrual, dan kewajiban kontinjensi telah diakui secara lengkap pada akhir periode.",
+         "Kewajiban yang tidak tercatat membuat utang dan beban tampak lebih kecil sehingga laba terlihat lebih tinggi.",
+         "Periksa pembayaran kas setelah akhir periode dan faktur tagihan yang belum dibukukan."),
+        ("A-25", "Lanjutan", "Penyusunan Laporan Hasil Audit, Tindak Lanjut & Pemantauan",
+         "Merangkum temuan secara objektif, menyusun rekomendasi praktis yang terukur, dan memantau komitmen perbaikan manajemen.",
+         "Temuan audit baru memberi nilai tambah nyata jika diikuti perbaikan sistem dan pengendalian yang berkelanjutan.",
+         "Susun rencana aksi dengan penanggung jawab dan tenggat waktu yang jelas untuk tiap temuan."),
+    ]
+
+    keuangan_25 = [
+        ("K-01", "Dasar", "Kerangka Laporan Keuangan: Laba Rugi, Neraca & Arus Kas",
+         "Laporan Laba Rugi mengukur kinerja periode; Neraca/Posisi Keuangan mengukur aset, liabilitas, dan ekuitas pada titik waktu; Arus Kas melacak aliran kas.",
+         "Ketiganya saling terhubung—laba akuntansi dan arus kas memiliki perbedaan waktu dan non-kas sehingga harus dibaca bersama.",
+         "Bandingkan tren laba dengan arus kas operasi sebelum menyimpulkan kualitas kinerja."),
+        ("K-02", "Dasar", "Persamaan Dasar Akuntansi & Struktur Neraca",
+         "Aset = Liabilitas + Ekuitas. Aset diklasifikasikan menjadi lancar dan tidak lancar; liabilitas menjadi jangka pendek dan jangka panjang.",
+         "Menunjukkan sumber daya yang dikendalikan entitas dan bagaimana aset tersebut dibiayai (utang vs modal sendiri).",
+         "Periksa keseimbangan neraca serta komposisi aset lancar vs liabilitas jangka pendek."),
+        ("K-03", "Dasar", "Struktur Laporan Laba Rugi & Margin Utama",
+         "Pendapatan dikurangi Beban Pokok/Operasional menghasilkan Laba Bruto, Laba Usaha/Operasional, hingga Laba Bersih.",
+         "Membantu memisahkan efisiensi produksi/jasa inti, beban operasional, beban bunga/pajak, dan pos non-operasional.",
+         "Pantau pergerakan margin kotor, margin operasi, dan margin bersih lintas periode."),
+        ("K-04", "Dasar", "Analisis Horizontal (Tren Antarperiode)",
+         "Membandingkan pos laporan keuangan dari satu periode ke periode lain dalam nominal maupun persentase perubahan.",
+         "Mengidentifikasi percepatan pertumbuhan, kontraksi penjualan, atau lonjakan beban yang mulai terbentuk.",
+         "Hitung pertumbuhan YoY/periode dan cek apakah pertumbuhan didorong volume/harga atau pos satu kali."),
+        ("K-05", "Dasar", "Analisis Vertikal (Common-Size Statement)",
+         "Menyatakan setiap pos sebagai persentase dari total acuan (misalnya % dari Total Aset pada neraca atau % dari Pendapatan pada laba rugi).",
+         "Memudahkan perbandingan struktur biaya dan komposisi aset lintas ukuran entitas atau lintas waktu.",
+         "Cari pos yang porsinya membesar secara tidak wajar dibanding total pendapatan atau total aset."),
+        ("K-06", "Menengah", "Rasio Likuiditas: Current Ratio",
+         "Current Ratio = Aset Lancar / Liabilitas Lancar. Mengukur kemampuan memenuhi kewajiban jangka pendek dengan aset lancar.",
+         "Menilai bantalan likuiditas jangka pendek tanpa harus menjual aset tetap.",
+         "Bandingkan dengan standar sektor serta perhatikan kualitas komponen aset lancar (kas vs piutang/persediaan)."),
+        ("K-07", "Menengah", "Quick Ratio (Acid-Test Ratio) & Kualitas Likuiditas",
+         "Quick Ratio = (Kas + Setara Kas + Piutang Lancar) / Liabilitas Lancar (mengeluarkan persediaan yang kurang likuid).",
+         "Memberikan gambaran likuiditas yang lebih konservatif bila persediaan lambat berputar atau sulit dicairkan cepat.",
+         "Waspadai current ratio yang tampak tinggi hanya karena penumpukan persediaan atau piutang lama."),
+        ("K-08", "Menengah", "Modal Kerja Bersih (Net Working Capital) & Siklus Kas",
+         "NWC = Aset Lancar - Liabilitas Lancar. Siklus konversi kas dipengaruhi perputaran piutang, persediaan, dan utang usaha.",
+         "Menunjukkan kebutuhan kas operasional untuk memutar bisnis sehari-hari seiring pertumbuhan penjualan.",
+         "Pertumbuhan pesat tanpa pengelolaan modal kerja dapat memicu tekanan kas meski laba tercatat positif."),
+        ("K-09", "Menengah", "Rasio Profitabilitas: Net Profit Margin (NPM)",
+         "NPM = (Laba Bersih / Pendapatan) × 100%. Mengukur berapa persen pendapatan yang berubah menjadi laba bersih.",
+         "Mencerminkan kemampuan entitas menghasilkan laba akhir setelah seluruh beban, bunga, dan pajak.",
+         "Evaluasi NPM bersama margin operasi agar dampak pajak atau pos non-operasional tidak menyesatkan."),
+        ("K-10", "Menengah", "Return on Assets (ROA)",
+         "ROA = (Laba Bersih / Total Aset) × 100%. Mengukur efisiensi penggunaan seluruh aset dalam menghasilkan laba.",
+         "Menilai produktivitas basis aset entitas terlepas dari cara pendanaannya.",
+         "Bandingkan ROA dengan biaya modal/bunga untuk menilai apakah aset menghasilkan imbal hasil memadai."),
+        ("K-11", "Menengah", "Return on Equity (ROE)",
+         "ROE = (Laba Bersih / Ekuitas) × 100%. Mengukur tingkat imbal hasil bagi pemilik modal/ekuitas.",
+         "Menunjukkan seberapa efektif modal pemegang saham dikelola untuk menghasilkan laba.",
+         "Cek apakah ROE tinggi berasal dari kinerja operasi yang kuat atau dari leverage utang yang tinggi."),
+        ("K-12", "Menengah", "Rasio Solvabilitas: Debt to Equity Ratio (DER)",
+         "DER = Total Liabilitas / Ekuitas. Mengukur proporsi pendanaan utang dibandingkan modal sendiri.",
+         "Menggambarkan struktur permodalan dan ketahanan menghadapi tekanan keuangan atau kenaikan suku bunga.",
+         "Nilai kewajaran DER sesuai karakteristik industri (utilitas/keuangan berbeda dengan perdagangan/jasa)."),
+        ("K-13", "Menengah", "Debt to Asset Ratio & Kemampuan Bayar Bunga",
+         "Debt to Asset = Total Liabilitas / Total Aset; Interest Coverage (EBIT / Beban Bunga) mengukur kemampuan menutup beban bunga.",
+         "Membantu menilai risiko gagal bayar dan ruang gerak keuangan saat arus kas melemah.",
+         "Perhatikan jadwal jatuh tempo utang dan sensitivitas laba terhadap perubahan beban bunga."),
+        ("K-14", "Menengah", "Rasio Aktivitas & Efisiensi Perputaran Aset",
+         "Asset Turnover = Pendapatan / Total Aset, ditambah perputaran piutang, persediaan, dan utang usaha.",
+         "Menunjukkan seberapa cepat aset berputar menjadi penjualan dan kas.",
+         "Perputaran yang melambat dapat menandakan kapasitas menganggur, stok menumpuk, atau penagihan lambat."),
+        ("K-15", "Menengah", "Analisis DuPont (Dekomposisi ROE)",
+         "ROE = Net Profit Margin × Total Asset Turnover × Equity Multiplier (Total Aset / Ekuitas).",
+         "Mengurai sumber perubahan ROE menjadi profitabilitas, efisiensi aset, dan leverage keuangan.",
+         "Gunakan dekomposisi ini untuk menentukan apakah perbaikan harus fokus ke margin, perputaran, atau struktur modal."),
+        ("K-16", "Menengah", "Kualitas Laba (Earnings Quality) & Akrual",
+         "Menilai sejauh mana laba didukung arus kas operasi dan bebas dari lonjakan akrual atau estimasi agresif.",
+         "Laba akuntansi tinggi dengan arus kas operasi lemah dapat menjadi sinyal awal tekanan kualitas laba.",
+         "Bandingkan laba bersih dengan arus kas dari aktivitas operasi secara konsisten."),
+        ("K-17", "Menengah", "Analisis Anggaran vs Realisasi (Variance Analysis)",
+         "Membandingkan anggaran/target dengan realisasi untuk menghitung varians nominal dan persentase pencapaian.",
+         "Membantu manajemen mengevaluasi akurasi perencanaan, disiplin eksekusi, dan kebutuhan penyesuaian.",
+         "Pisahkan varians akibat volume/aktivitas dari varians akibat harga/tarif atau efisiensi biaya."),
+        ("K-18", "Lanjutan", "Keuangan Sektor Publik / Pemerintahan: Efektivitas & Efisiensi",
+         "Efektivitas Pendapatan = (Realisasi Pendapatan / Anggaran Pendapatan) × 100%; Efisiensi Belanja = (Realisasi Belanja / Anggaran Belanja) × 100%.",
+         "Mengukur ketepatan target penerimaan dan tingkat penyerapan/penghematan belanja publik.",
+         "Interpretasikan efisiensi belanja bersama capaian output/outcome program agar tidak keliru menilai belanja rendah."),
+        ("K-19", "Lanjutan", "Kemandirian Fiskal Daerah & Struktur Pendapatan Publik",
+         "Rasio Kemandirian = (PAD / Pendapatan Transfer atau Total Pendapatan) × 100%.",
+         "Menggambarkan kapasitas pendanaan sendiri daerah/entitas publik dibandingkan transfer eksternal.",
+         "Dorong peningkatan PAD berkelanjutan melalui basis pajak/retribusi dan layanan publik yang sehat."),
+        ("K-20", "Lanjutan", "Surplus/Defisit & Pembiayaan Netto",
+         "Surplus/Defisit mencerminkan selisih pendapatan dan belanja periode berjalan; pembiayaan menutup defisit atau memanfaatkan surplus.",
+         "Menunjukkan keseimbangan fiskal tahunan dan dampak terhadap saldo kas/SILPA.",
+         "Pastikan penggunaan pembiayaan/SILPA terarah dan tidak menutupi defisit struktural berulang."),
+        ("K-21", "Lanjutan", "Unit Economics, Break-Even & Struktur Biaya Tetap/Variabel",
+         "Memisahkan biaya variabel (berubah seiring volume) dan biaya tetap untuk memahami titik impas dan sensitivitas laba.",
+         "Membantu menentukan dampak perubahan volume penjualan terhadap laba dan kebutuhan kas.",
+         "Hitung margin kontribusi sebelum menambah kapasitas atau diskon harga agresif."),
+        ("K-22", "Lanjutan", "Valuasi & Kelipatan Keuangan (P/E, PBV, EV/EBITDA)",
+         "Metrik penilaian berbasis laba, nilai buku ekuitas, atau nilai perusahaan terhadap EBITDA.",
+         "Memberikan konteks kewajaran harga atau nilai relatif terhadap pertumbuhan dan risiko entitas.",
+         "Gunakan beberapa metrik secara berdampingan dan sesuaikan dengan profil pertumbuhan serta risiko."),
+        ("K-23", "Lanjutan", "Deteksi Dini Distres Keuangan & Risiko Kebangkrutan",
+         "Pemantauan sinyal awal seperti rugi berulang, likuiditas mengetat, rasio utang membesar, dan arus kas operasi negatif.",
+         "Memberi peringatan dini agar restrukturisasi atau efisiensi dapat dilakukan sebelum krisis likuiditas terjadi.",
+         "Pantau indikator likuiditas dan arus kas bulanan, bukan hanya laporan tahunan."),
+        ("K-24", "Lanjutan", "Catatan atas Laporan Keuangan (CALK) & Kebijakan Akuntansi",
+         "Penjelasan naratif dan rincian kebijakan akuntansi, komitmen, kontinjensi, pihak berelasi, serta peristiwa setelah periode pelaporan.",
+         "Angka di laporan utama sering kali tidak lengkap tanpa membaca kebijakan dan komitmen di CALK.",
+         "Selalu baca CALK untuk memahami asumsi estimasi, jaminan/utang bersyarat, dan perubahan kebijakan."),
+        ("K-25", "Lanjutan", "Menyusun Rekomendasi Keuangan yang Terukur",
+         "Merumuskan langkah perbaikan yang spesifik, realistis, berprioritas, dan terukur berdasarkan temuan rasio dan tren.",
+         "Menghubungkan analisis diagnostik menjadi keputusan manajemen yang konkret.",
+         "Kaitkan setiap rekomendasi dengan target metrik, risiko yang dikurangi, dan dampak finansialnya."),
+    ]
+
+    aruskas_25 = [
+        ("C-01", "Dasar", "Konsep Dasar Laporan Arus Kas (PSAK 207 / PSAK 2)",
+         "Melaporkan penerimaan dan pengeluaran kas serta setara kas selama periode tertentu menurut aktivitas operasi, investasi, dan pendanaan.",
+         "Menjelaskan bagaimana kas dihasilkan dan digunakan sehingga posisi kas awal berubah menjadi kas akhir.",
+         "Bedakan aliran kas aktual dari pendapatan/beban berbasis akrual."),
+        ("C-02", "Dasar", "Kas dan Setara Kas (Cash & Cash Equivalents)",
+         "Kas di tangan/bank dan investasi jangka pendek yang sangat likuid, mudah dikonversi menjadi kas, dan berisiko kecil terhadap perubahan nilai (umumnya jatuh tempo ≤ 3 bulan).",
+         "Menjadi dasar definisi kas yang direkonsiliasi dari awal hingga akhir periode pelaporan.",
+         "Pastikan saldo kas awal dan akhir mengacu pada definisi kas dan setara kas yang konsisten."),
+        ("C-03", "Dasar", "Aktivitas Operasi (Operating Cash Flows - CFO)",
+         "Arus kas dari aktivitas penghasil pendapatan utama entitas dan aktivitas lain yang bukan investasi maupun pendanaan.",
+         "Menunjukkan apakah bisnis inti mampu menghasilkan kas cukup untuk membiayai operasi tanpa mengandalkan pinjaman atau modal baru.",
+         "Pantau konsistensi CFO positif sebagai indikator kesehatan operasional jangka panjang."),
+        ("C-04", "Dasar", "Aktivitas Investasi (Investing Cash Flows - CFI)",
+         "Arus kas dari perolehan dan pelepasan aset jangka panjang serta investasi lain yang tidak termasuk setara kas.",
+         "Menggambarkan ekspansi kapasitas, peremajaan aset, atau pencairan investasi jangka panjang.",
+         "Arus kas investasi negatif sering kali wajar jika mencerminkan belanja modal (CapEx) produktif."),
+        ("C-05", "Dasar", "Aktivitas Pendanaan (Financing Cash Flows - CFF)",
+         "Arus kas yang mengakibatkan perubahan dalam jumlah serta komposisi modal ekuitas dan pinjaman entitas.",
+         "Menunjukkan bagaimana entitas mendanai pertumbuhan atau melunasi kewajiban pendanaan melalui utang, ekuitas, atau dividen.",
+         "Perhatikan arus kas masuk pinjaman/modal vs arus kas keluar pembayaran pokok utang dan dividen."),
+        ("C-06", "Menengah", "Metode Langsung (Direct Method) Arus Kas Operasi",
+         "Mengungkapkan kelompok utama penerimaan kas bruto dan pembayaran kas bruto (misalnya kas diterima dari pelanggan, dibayar ke pemasok/karyawan/pajak).",
+         "Memberikan informasi arus kas masuk dan keluar bruto yang bermanfaat untuk mengestimasi arus kas masa depan.",
+         "Kelompokkan penerimaan dan pengeluaran kas bruto secara jelas dan konsisten."),
+        ("C-07", "Menengah", "Metode Tidak Langsung (Indirect Method) Arus Kas Operasi",
+         "Menyesuaikan laba/rugi bersih atas transaksi non-kas (penyusutan/amortisasi), pos akrual/deferal, serta perubahan aset dan liabilitas operasi.",
+         "Menghubungkan laba bersih akuntansi dengan arus kas operasi serta menyoroti dampak modal kerja.",
+         "Periksa perubahan piutang, persediaan, dan utang usaha yang memengaruhi konversi laba menjadi kas."),
+        ("C-08", "Menengah", "Rekonsiliasi Saldo Kas Awal, Perubahan Neto & Kas Akhir",
+         "Saldo Kas Akhir ≈ Saldo Kas Awal + Kenaikan/Penurunan Neto Kas (+ pengaruh perubahan kurs bila ada).",
+         "Memastikan konsistensi matematis laporan arus kas dan mencegah selisih pencatatan yang tidak terjelaskan.",
+         "Selidiki segera apabila saldo kas akhir laporan berbeda dari perhitungan rekonsiliasi saldo awal + perubahan neto."),
+        ("C-09", "Menengah", "Pos Non-Kas & Transaksi Investasi/Pendanaan Non-Kas",
+         "Transaksi seperti konversi utang menjadi saham, perolehan aset melalui sewa/kredit langsung, atau penyusutan yang tidak melibatkan kas periode berjalan.",
+         "Mencegah kekeliruan mengira pos non-kas sebagai aliran kas aktual.",
+         "Sajikan informasi transaksi non-kas secara terpisah sebagai pengungkapan pendukung."),
+        ("C-10", "Menengah", "Klasifikasi Bunga, Dividen & Pajak Penghasilan",
+         "Arus kas dari bunga dan dividen umumnya disajikan secara konsisten antarperiode; pajak penghasilan diklasifikasikan sebagai operasi kecuali dapat diidentifikasi khusus.",
+         "Menjaga komparabilitas antarperiode dan ketepatan pengelompokan aktivitas.",
+         "Pertahankan konsistensi klasifikasi bunga dan dividen dari tahun ke tahun."),
+        ("C-11", "Menengah", "Free Cash Flow (FCF) & Makna Surplus/Defisit Kas Bebas",
+         "FCF secara praktis diukur sebagai Arus Kas Operasi dikurangi Belanja Modal (CapEx) untuk aset tetap.",
+         "Menunjukkan kas tersisa setelah membiayai operasi dan mempertahankan/mengembangkan aset tetap untuk melunasi utang, membayar dividen, atau menambah cadangan kas.",
+         "Bedakan FCF negatif karena ekspansi CapEx terencana vs FCF negatif akibat CFO yang melemah."),
+        ("C-12", "Menengah", "Cash Flow Margin (%)",
+         "Cash Flow Margin = (Arus Kas Operasi / Pendapatan atau Penerimaan Pelanggan) × 100%.",
+         "Mengukur seberapa efisien setiap rupiah pendapatan dikonversi menjadi kas operasi.",
+         "Bandingkan dengan margin laba untuk melihat apakah penjualan cepat menjadi kas atau tertahan di piutang."),
+        ("C-13", "Menengah", "Operating Cash Flow Ratio (x)",
+         "Operating Cash Flow Ratio = Arus Kas Operasi / Liabilitas Lancar.",
+         "Menilai kemampuan arus kas operasi menutupi kewajiban jangka pendek dalam satu periode.",
+         "Rasio yang kuat menandakan pelunasan kewajiban jangka pendek ditopang kas operasional, bukan utang baru."),
+        ("C-14", "Menengah", "Cash Flow to Debt Ratio (%)",
+         "Cash Flow to Debt = (Arus Kas Operasi / Total Utang) × 100%.",
+         "Mengukur kapasitas arus kas operasi untuk menutup keseluruhan kewajiban utang.",
+         "Semakin tinggi rasio ini, semakin kuat kemampuan entitas melunasi utang dari kas operasional."),
+        ("C-15", "Menengah", "Cash Flow Coverage / Debt Service Coverage (x)",
+         "Mengukur kecukupan arus kas operasi terhadap pembayaran pokok pinjaman, bunga, atau kewajiban layanan utang.",
+         "Menilai risiko tekanan kas saat jatuh tempo cicilan atau pembayaran bunga tiba.",
+         "Perhatikan kecukupan kas operasi terutama saat jadwal pembayaran utang membesar."),
+        ("C-16", "Menengah", "Analisis Tren Arus Kas Antarperiode (Komparatif)",
+         "Membandingkan CFO, CFI, CFF, perubahan neto kas, dan saldo kas akhir lintas beberapa tahun/periode.",
+         "Mengungkap pergeseran fase usaha, ketergantungan pendanaan, atau perubahan pola belanja modal.",
+         "Lihat arah pergerakan tiap aktivitas secara terpisah, bukan hanya perubahan kas total."),
+        ("C-17", "Menengah", "Analisis Tren Bulanan, Kas Masuk vs Kas Keluar & Burn Rate",
+         "Menelusuri arus kas masuk, arus kas keluar, saldo berjalan bulanan, dan rata-rata pengeluaran kas operasional bulanan (burn rate).",
+         "Membantu memantau volatilitas kas musiman dan memperkirakan ketahanan kas (cash runway).",
+         "Waspadai pengeluaran bulanan yang konsisten melampaui kas masuk."),
+        ("C-18", "Lanjutan", "Pola Siklus Hidup Perusahaan melalui Tanda CFO, CFI & CFF",
+         "Kombinasi tanda (+/-) pada CFO, CFI, dan CFF sering mencerminkan tahapan pertumbuhan, ekspansi, kematangan, atau tekanan keuangan.",
+         "Membantu menginterpretasikan apakah arus kas negatif pada satu aktivitas bersifat strategis atau bermasalah.",
+         "Selalu gabungkan pola tanda arus kas dengan konteks bisnis dan posisi neraca."),
+        ("C-19", "Lanjutan", "Risiko Ketergantungan pada Pendanaan Eksternal",
+         "Terjadi ketika arus kas operasi negatif atau tidak mencukupi sehingga kas tetap terjaga berkat pinjaman baru atau setoran modal.",
+         "Pendanaan eksternal bersifat terbatas dan membawa biaya bunga atau ekspektasi imbal hasil.",
+         "Evaluasi rencana pemulihan CFO agar entitas tidak bergantung terus-menerus pada utang/modal baru."),
+        ("C-20", "Lanjutan", "Modal Kerja & Dampak Piutang/Persediaan terhadap Kas",
+         "Kenaikan piutang atau persediaan menyerap kas meskipun penjualan/laba tercatat naik; kenaikan utang usaha menahan kas keluar sementara.",
+         "Menjelaskan mengapa laba bersih sering berbeda dari arus kas operasi.",
+         "Periksa pertumbuhan piutang dan persediaan bersama pertumbuhan pendapatan."),
+        ("C-21", "Lanjutan", "Deteksi Anomali Pengeluaran Kas (Metode IQR pada Mutasi)",
+         "Mengidentifikasi transaksi pengeluaran kas yang berada di atas batas atas IQR (Q3 + 1,5×IQR) pada data mutasi/transaksi.",
+         "Menyaring transaksi keluar bernilai ekstrem untuk ditinjau otorisasi, kewajaran, dan kelengkapan buktinya.",
+         "Perlakukan hasil outlier sebagai daftar prioritas pemeriksaan, bukan vonis pelanggaran."),
+        ("C-22", "Lanjutan", "Klasifikasi Transaksi Mutasi Bank & Keterbatasan Kata Kunci",
+         "Mengelompokkan mutasi transaksi ke operasi, investasi, atau pendanaan berdasarkan keterangan/kategori.",
+         "Klasifikasi otomatis berbasis kata kunci memiliki keterbatasan bila uraian transaksi singkat atau ambigu.",
+         "Tinjau kembali klasifikasi transaksi bernilai besar atau beruraian umum sebelum finalisasi."),
+        ("C-23", "Lanjutan", "Proksi & Estimasi Rasio saat Data Neraca/Laba Rugi Terbatas",
+         "Menggunakan pos/proksi terkait di file saat akun neraca/laba rugi penuh tidak tersedia, sembari mencatat keterbatasannya.",
+         "Memungkinkan pembacaan awal yang tetap transparan mengenai asumsi dan batasan data.",
+         "Cantumkan secara jelas bahwa proksi/estimasi perlu diverifikasi dengan laporan keuangan lengkap."),
+        ("C-24", "Lanjutan", "Manajemen Likuiditas, Buffer Kas & Perencanaan Arus Kas",
+         "Menjaga cadangan kas memadai, menyelaraskan jadwal penerimaan dan pembayaran, serta menyusun proyeksi kas.",
+         "Mencegah krisis likuiditas mendadak akibat keterlambatan penagihan atau pengeluaran tak terduga.",
+         "Susun proyeksi arus kas jangka pendek dan tetapkan batas minimum kas operasional."),
+        ("C-25", "Lanjutan", "Menyusun Ringkasan Eksekutif Arus Kas & Rekomendasi",
+         "Menyajikan ringkasan yang memisahkan fakta angka, interpretasi, keterbatasan data, dan rekomendasi tindakan.",
+         "Memudahkan pimpinan atau auditor mengambil keputusan berbasis bukti yang terukur.",
+         "Pastikan setiap kesimpulan merujuk pada angka yang terverifikasi dan menyatakan asumsi dengan jujur."),
+    ]
+
+    return {
+        "Audit Profesional": audit_25,
+        "Analisis Keuangan": keuangan_25,
+        "Analisis Arus Kas": aruskas_25,
+    }
+
+
+def _render_study_track(track_title, track_desc, materials):
+    st.markdown(f"### {track_title}")
+    st.caption(f"{track_desc} — Total **{len(materials)} materi** lengkap untuk pembelajaran.")
+    c_f1, c_f2 = st.columns([2, 1])
+    search_q = c_f1.text_input(
+        f"Cari topik / kata kunci ({track_title})",
+        placeholder="Contoh: sampling, likuiditas, free cash flow, rekonsiliasi...",
+        key=f"study_search_{track_title}"
+    )
+    level_filter = c_f2.selectbox(
+        "Filter tingkat materi",
+        ["Semua Level", "Dasar", "Menengah", "Lanjutan"],
+        key=f"study_level_{track_title}"
+    )
+
+    filtered = []
+    for item in materials:
+        code, lvl, title, konsep, fungsi, praktik = item
+        if level_filter != "Semua Level" and lvl != level_filter:
+            continue
+        haystack = f"{code} {lvl} {title} {konsep} {fungsi} {praktik}".lower()
+        if search_q.strip() and search_q.strip().lower() not in haystack:
+            continue
+        filtered.append(item)
+
+    st.markdown(f"Menampilkan **{len(filtered)}** dari **{len(materials)}** materi.")
+    if not filtered:
+        st.info("Tidak ada materi yang cocok dengan filter pencarian.")
+        return
+
+    for code, lvl, title, konsep, fungsi, praktik in filtered:
+        with st.expander(f"{code} [{lvl}] — {title}", expanded=False):
+            st.markdown(f"**Konsep Inti:** {konsep}")
+            st.markdown(f"**Kegunaan dalam Analisis:** {fungsi}")
+            st.markdown(f"**Penerapan Praktis:** {praktik}")
+
+
 def page_learning_center():
-    finora_header("Akademi FINORA", "Pusat Pembelajaran Audit & Keuangan Perusahaan")
-    st.markdown("Selamat datang di **Akademi FINORA**! Di sini Anda dapat mempelajari dasar-dasar audit dan analisis keuangan perusahaan.")
+    finora_header("FINORA Study", "Pusat Pembelajaran Audit, Analisis Keuangan & Analisis Arus Kas")
+    st.markdown(
+        "Selamat datang di **FINORA Study**! Tersedia **75 materi pembelajaran** terstruktur "
+        "(**25 materi per analisis**) untuk mendukung pembelajaran **Audit Profesional**, "
+        "**Analisis Keuangan**, dan **Analisis Arus Kas**."
+    )
     st.markdown("---")
-    tab_audit, tab_keuangan = st.tabs(["🔎 Modul Audit", "🏢 Modul Keuangan Perusahaan"])
+    all_tracks = _get_finora_study_materials()
+    tab_audit, tab_keuangan, tab_aruskas = st.tabs([
+        "🔎 Audit Profesional (25 Materi)",
+        "📈 Analisis Keuangan (25 Materi)",
+        "💧 Analisis Arus Kas (25 Materi)"
+    ])
     with tab_audit:
-        st.markdown("### 📚 Kurikulum Dasar Audit")
-        with st.expander("Modul 1: Apa itu Audit dan Mengapa Penting?"):
-            st.markdown("**Pengertian Audit:**\nAudit adalah proses pengumpulan dan evaluasi bukti secara objektif mengenai asersi tentang tindakan dan peristiwa ekonomi, untuk menentukan tingkat kesesuaian antara asersi tersebut dengan kriteria yang telah ditetapkan.\n\n**Mengapa Penting?**\n1. **Mengurangi Risiko Informasi:** Manajemen mungkin memiliki insentif untuk memanipulasi laporan. Auditor independen memvalidasi kebenarannya.\n2. **Mendeteksi Kecurangan (Fraud):** Menemukan anomali seperti penggelapan kas, mark-up harga, atau transaksi fiktif.\n3. **Kepatuhan (Compliance):** Memastikan perusahaan mematuhi peraturan pemerintah dan standar akuntansi (SAK/PSAK).")
-        with st.expander("Modul 2: 5 Jenis Opini Audit"):
-            st.markdown("Auditor memberikan opini atas kewajaran laporan keuangan. Ada 5 jenis opini:\n1. **Wajar Tanpa Modifikasian (Unqualified Opinion):** Laporan keuangan disajikan secara wajar. (Opini terbaik).\n2. **Wajar Dengan Pengecualian (Qualified Opinion):** Ada masalah material, tapi tidak mempengaruhi keseluruhan laporan. (Misal: Salah satu cabang tidak diaudit).\n3. **Opini Tanpa Wajar (Adverse Opinion):** Laporan keuangan salah saji secara material dan merata. (Sangat buruk).\n4. **Opini Tidak Menyatakan Pendapat (Disclaimer of Opinion):** Auditor tidak bisa mendapatkan bukti yang cukup untuk memberikan opini.\n5. **Opini Wajar Tanpa Modifikasian dengan Paragraf Penekanan:** Ada hal penting yang perlu ditekankan (misal: bencana alam).")
-        with st.expander("Modul 3: Teknik Sampling dalam Audit"):
-            st.markdown("Auditor tidak mungkin memeriksa seluruh transaksi jika jumlahnya jutaan. Oleh karena itu, digunakan **Teknik Sampling**.\n*   **Statistical Sampling:** Menggunakan rumus matematika (seperti *Random Sampling* atau *Monetary Unit Sampling*). Cocok untuk data yang sangat besar dan homogen.\n*   **Non-Statistical Sampling (Judgmental):** Berdasarkan pengalaman auditor. (Misal: memilih transaksi di atas Rp 100 juta karena risiko lebih tinggi).\n*   **Interval Sampling:** Memilih sampel berdasarkan kelipatan angka tertentu (misal: setiap transaksi ke-50).")
+        _render_study_track(
+            "Materi Audit Profesional",
+            "Dasar audit, pengendalian intern, sampling, prosedur deteksi anomali, hingga pelaporan KKA",
+            all_tracks["Audit Profesional"]
+        )
     with tab_keuangan:
-        st.markdown("### 📈 Kurikulum Analisis Keuangan")
-        with st.expander("Modul 1: 3 Laporan Keuangan Utama"):
-            st.markdown("Untuk menganalisis perusahaan, Anda harus paham 3 laporan inti:\n1. **Laporan Laba Rugi (Income Statement):** Menunjukkan kinerja operasional selama satu periode. (Pendapatan - Beban = Laba Bersih).\n2. **Neraca (Balance Sheet):** Potret posisi keuangan pada satu titik waktu tertentu. (Aset = Liabilitas + Ekuitas).\n3. **Laporan Arus Kas (Cash Flow Statement):** Melacak aliran kas masuk dan keluar (Operasi, Investasi, Pendanaan). *Ingat: Laba tinggi belum tentu kasnya ada!*")
-        with st.expander("Modul 2: Memahami Rasio Keuangan (Financial Ratios)"):
-            st.markdown("Rasio keuangan membantu kita menilai kesehatan perusahaan tanpa harus membaca seluruh angka. Terdapat 4 kategori utama:\n*   **Rasio Likuiditas (Current Ratio):** Apakah perusahaan mampu membayar utang jangka pendek? (Aset Lancar / Utang Lancar).\n*   **Rasio Solvabilitas (Debt to Equity):** Seberapa besar perusahaan bergantung pada utang? (Total Utang / Ekuitas).\n*   **Rasio Profitabilitas (ROA, ROE, NPM):** Seberapa efisien perusahaan menghasilkan laba? (Laba / Aset atau Ekuitas).\n*   **Rasio Aktivitas (Perputaran Piutang):** Seberapa cepat perusahaan menagih piutangnya?")
-        with st.expander("Modul 3: Deteksi Dini Kebangkrutan"):
-            st.markdown("Perusahaan bisa bangkrut bukan hanya karena rugi, tapi seringkali karena **Kehabisan Kas (Cash Flow Trap)**.\n\n**Tanda-tanda Bahaya:**\n*   Laba di laporan naik, tapi saldo kas menurun drastis.\n*   Piutang menumpuk tak tertagih (banyak penjualan fiktif).\n*   Ketergantungan tinggi pada utang jangka pendek untuk membiayai operasional.\n\n**Solusi:**\nGunakan analisis *Cash Runway* (seperti yang ada di menu Analisis Arus Kas FINORA) untuk melihat seberapa lama kas perusahaan bisa bertahan sebelum habis.")
+        _render_study_track(
+            "Materi Analisis Keuangan",
+            "Laporan keuangan, rasio likuiditas/profitabilitas/solvabilitas/aktivitas, sektor publik & evaluasi",
+            all_tracks["Analisis Keuangan"]
+        )
+    with tab_aruskas:
+        _render_study_track(
+            "Materi Analisis Arus Kas",
+            "PSAK 207/2, aktivitas operasi/investasi/pendanaan, rekonsiliasi, rasio arus kas, tren & risiko",
+            all_tracks["Analisis Arus Kas"]
+        )
 
 def page_dashboard():
     finora_header("Dashboard", "Ringkasan seluruh aktivitas FINORA AI")
@@ -1947,7 +2313,7 @@ def main():
             "Audit Profesional", 
             "Analisis Keuangan", 
             "Analisis Arus Kas", 
-            "Akademi FINORA", 
+            "FINORA Study", 
             "Simpan"
         ])
         st.sidebar.markdown("---")
@@ -1959,7 +2325,7 @@ def main():
         elif nav == "Audit Profesional": page_audit()
         elif nav == "Analisis Keuangan": page_financial_analysis()
         elif nav == "Analisis Arus Kas": page_cash_flow()
-        elif nav == "Akademi FINORA": page_learning_center()
+        elif nav == "FINORA Study": page_learning_center()
         elif nav == "Simpan": page_simpan()
 
 if __name__ == "__main__":
