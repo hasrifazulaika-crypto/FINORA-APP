@@ -663,35 +663,64 @@ def page_financial_analysis():
 
 def page_cash_flow():
     finora_header("Cash Flow Intelligence", "Prediksi Likuiditas & Analisis Arus Kas Mendatang")
+    
     st.markdown("### 1. Upload Data Transaksi")
     c1, c2 = st.columns([3, 1])
     uploaded_cf = c1.file_uploader("Upload File Excel/CSV Mutasi Bank/Kas", type=["xlsx", "csv"], key="cf_upload")
-    header_row_cf = c2.number_input("Header di baris ke-", min_value=0, value=0, key="cf_header")
+    header_row_cf = c2.number_input("Header di baris ke-", min_value=0, value=0, key="cf_header", help="Ubah ke 1 atau 2 jika baris pertama Excel adalah Judul.")
+    
     if uploaded_cf:
         df_cf = pd.read_excel(uploaded_cf, header=header_row_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_row_cf)
-        col_tgl = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["tanggal", "tgl", "date"])), None)
-        col_ket = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["keterangan", "deskripsi", "uraian", "nama"])), None)
-        col_nom = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit"])), None)
-        if not col_tgl or not col_nom: st.error("⚠️ Gagal mendeteksi kolom Tanggal atau Nominal.")
+        
+        # AI Auto-Detect
+        auto_tgl = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["tanggal", "tgl", "date", "waktu"])), "")
+        auto_ket = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["keterangan", "deskripsi", "uraian", "nama", "category"])), "")
+        auto_nom = next((c for c in df_cf.columns if any(k in str(c).lower() for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit", "mutasi"])), "")
+        
+        st.markdown("### 2. Pemetaan Kolom (Wajib)")
+        st.info("✨ FINORA AI telah mendeteksi otomatis kolom. Jika ada yang salah, silakan koreksi di bawah ini.")
+        
+        c3, c4, c5 = st.columns(3)
+        col_tgl = c3.selectbox("Kolom Tanggal", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl)+1 if auto_tgl else 0)
+        col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket else 0)
+        col_nom = c5.selectbox("Kolom Nominal", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_nom)+1 if auto_nom else 0)
+        
+        if not col_tgl or not col_nom:
+            st.warning("⚠️ Silakan pilih Kolom Tanggal dan Kolom Nominal terlebih dahulu di menu di atas.")
         else:
+            # Proses Data
             df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce')
             df_cf[col_nom] = pd.to_numeric(df_cf[col_nom], errors='coerce').fillna(0)
             df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
-            if col_ket is None: df_cf['Kategori'] = 'Lainnya'
-            else: df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
+            
+            if col_ket:
+                df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
+            else:
+                df_cf['Kategori'] = 'Lainnya'
+                
             st.success(f"✨ Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
-            st.markdown("### 2. Pengaturan Saldo Awal")
+            
+            st.markdown("### 3. Pengaturan Saldo Awal")
             saldo_awal = st.number_input("Masukkan Saldo Kas Awal (Rp)", min_value=0, value=10000000, step=1000000)
+            
             if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
                 with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
                     df_cf['Running Balance'] = saldo_awal + df_cf[col_nom].cumsum()
                     total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
                     total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
                     saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else saldo_awal
+                    
                     bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
                     burn_rate = abs(total_keluar) / bulan_unik
                     bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
-                    st.session_state['cf_results'] = {"df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, "total_masuk": total_masuk, "total_keluar": total_keluar, "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, "bulan_bertahan": bulan_bertahan, "saldo_awal": saldo_awal}
+                    
+                    st.session_state['cf_results'] = {
+                        "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
+                        "total_masuk": total_masuk, "total_keluar": total_keluar, 
+                        "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
+                        "bulan_bertahan": bulan_bertahan, "saldo_awal": saldo_awal
+                    }
+
     if 'cf_results' in st.session_state:
         res_cf = st.session_state['cf_results']
         st.markdown("---")
@@ -701,18 +730,22 @@ def page_cash_flow():
         with m2: metric_card("Total Keluar", format_rupiah(res_cf['total_keluar']))
         with m3: metric_card("Saldo Akhir", format_rupiah(res_cf['saldo_akhir']))
         with m4: metric_card("Cash Runway", f"{res_cf['bulan_bertahan']:.1f} Bulan", help_text="Estimasi berapa bulan kas Anda akan bertahan.")
+        
         tab_grafik_cf, tab_deteksi_cf, tab_ai_cf = st.tabs(["📈 Tren & Kategori", "🚨 Deteksi Anomali", "🧠 AI Cash Flow Advisor"])
+        
         with tab_grafik_cf:
             st.markdown("#### Tren Saldo Kas")
             fig_area = px.area(res_cf['df'], x=res_cf['col_tgl'], y='Running Balance', title="Pergerakan Saldo Kas", color_discrete_sequence=['#FF5C8B'])
             fig_area.update_traces(fillcolor='rgba(255, 92, 139, 0.2)', line_color='#7A1F3D', line_width=3)
             st.plotly_chart(fig_area, use_container_width=True)
+            
             st.markdown("#### Proporsi Pengeluaran (Top 10 Kategori)")
             df_out = res_cf['df'][res_cf['df'][res_cf['col_nom']] < 0].copy()
             df_out['Nominal_Abs'] = df_out[res_cf['col_nom']].abs()
             top_out = df_out.groupby('Kategori')['Nominal_Abs'].sum().nlargest(10).reset_index()
             if not top_out.empty: st.plotly_chart(px.pie(top_out, names='Kategori', values='Nominal_Abs', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu_r), use_container_width=True)
             else: st.info("Tidak ada data pengeluaran.")
+            
         with tab_deteksi_cf:
             st.markdown("### 🚨 Transaksi Anomali (Pengeluaran Ekstrem)")
             df_out_all = res_cf['df'][res_cf['df'][res_cf['col_nom']] < 0]
@@ -722,6 +755,7 @@ def page_cash_flow():
                 if not df_anomali.empty: st.dataframe(df_anomali[[res_cf['col_tgl'], 'Kategori', res_cf['col_nom']]], use_container_width=True)
                 else: st.success("Aman! Tidak ada pengeluaran ekstrem yang terdeteksi.")
             else: st.info("Tidak ada data pengeluaran untuk dianalisis.")
+            
         with tab_ai_cf:
             st.markdown("### 🤖 AI Cash Flow Advisor")
             if st.button("Analisis Kesehatan Cash Flow", use_container_width=True):
@@ -729,7 +763,6 @@ def page_cash_flow():
                 prompt_cf = "Sebagai Konsultan Keuangan, berikan analisis atas arus kas ini.\n1. Berapa lama perusahaan bisa bertahan?\n2. Apa saran konkret untuk memperpanjang cash runway?\n3. Berikan simulasi: 'Jika memotong biaya operasional 20%, berapa lama cash flow bertahan?'"
                 with st.chat_message("assistant"): st.write_stream(ask_gemini_stream(prompt_cf, context_cf, system_role="Konsultan Keuangan & Cash Flow Specialist"))
                 st.success("Analisis AI Selesai.")
-
 def page_learning_center():
     finora_header("Akademi FINORA", "Pusat Pembelajaran Audit & Keuangan Perusahaan")
     st.markdown("Selamat datang di **Akademi FINORA**! Di sini Anda dapat mempelajari dasar-dasar audit dan analisis keuangan perusahaan.")
