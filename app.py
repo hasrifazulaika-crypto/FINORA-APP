@@ -12,7 +12,7 @@ from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from google import genai
-import openpyxl  # <-- TAMBAHAN UNTUK BYPASS ERROR EXCEL TABLE
+import openpyxl  # <-- MUTLAK DIPERLUKAN UNTUK BYPASS ERROR EXCEL
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -66,7 +66,6 @@ MODULE_TO_KEY = {
 }
 
 def format_rupiah(val):
-    """Format rupiah dengan tanda kurung untuk nilai negatif (standar akuntansi)."""
     try:
         val = float(val)
     except Exception:
@@ -106,7 +105,6 @@ def metric_card(label, value, help_text=""):
     st.markdown(f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""", unsafe_allow_html=True)
 
 def _clean_headers(raw_headers):
-    """Bersihkan header: isi kosong → Unnamed_X, duplicate → nama_2, nama_3, dst."""
     cleaned = []
     for j, h in enumerate(raw_headers):
         h_str = str(h).strip()
@@ -119,33 +117,32 @@ def _clean_headers(raw_headers):
         cleaned.append(h_str)
     return cleaned
 
+# ============================================================
+# FUNGSI MUTLAK PEMBACA EXCEL (BYPASS PANDAS ERROR)
+# ============================================================
+def read_excel_manual(uploaded_file):
+    """Membaca Excel murni via openpyxl tanpa menyentuh pd.read_excel()"""
+    uploaded_file.seek(0)
+    wb = openpyxl.load_workbook(uploaded_file, data_only=True, read_only=True)
+    ws = wb.active
+    data = list(ws.iter_rows(values_only=True))
+    return pd.DataFrame(data)
+
 def safe_read_dataframe(uploaded, header_row=0):
-    """Baca Excel/CSV dengan aman dari duplicate column names & Excel Table (Bypass openpyxl)."""
-    try:
+    """Membaca dataframe secara aman, kebal dari error duplikat kolom"""
+    if uploaded.name.endswith('xlsx'):
+        df_raw = read_excel_manual(uploaded)
+    else:
         uploaded.seek(0)
-        return (pd.read_excel(uploaded, header=header_row)
-                if uploaded.name.endswith('xlsx')
-                else pd.read_csv(uploaded, header=header_row))
-    except ValueError as e:
-        if "Duplicate column names" in str(e):
-            uploaded.seek(0)
-            # Bypass pandas, baca pakai openpyxl murni (read_only=True)
-            if uploaded.name.endswith('xlsx'):
-                wb = openpyxl.load_workbook(uploaded, data_only=True, read_only=True)
-                ws = wb.active
-                data = list(ws.iter_rows(values_only=True))
-                df_raw = pd.DataFrame(data)
-            else:
-                df_raw = pd.read_csv(uploaded, header=None)
-                
-            if header_row >= len(df_raw):
-                raise
-            cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
-            df = df_raw.iloc[header_row + 1:].copy()
-            df.columns = cleaned
-            return df.reset_index(drop=True)
-        else:
-            raise e
+        df_raw = pd.read_csv(uploaded, header=None)
+        
+    if header_row >= len(df_raw):
+        return df_raw
+        
+    cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
+    df = df_raw.iloc[header_row + 1:].copy()
+    df.columns = cleaned
+    return df.reset_index(drop=True)
 
 # ============================================================
 # DATABASE
@@ -771,21 +768,9 @@ def page_cash_flow():
 
     if uploaded_cf:
         try:
-            # === SELALU baca dengan header=None dulu (aman dari duplicate columns) ===
+            # === MUTLAK: BACA EXCEL VIA OPENPYXL (BUKAN PANDAS) ===
             if uploaded_cf.name.endswith('xlsx'):
-                uploaded_cf.seek(0)
-                try:
-                    df_raw = pd.read_excel(uploaded_cf, header=None)
-                except ValueError as e:
-                    if "Duplicate column names" in str(e):
-                        uploaded_cf.seek(0)
-                        # BACA PAKSA PAKAI OPENPYXL (Anti Error Excel Table)
-                        wb = openpyxl.load_workbook(uploaded_cf, data_only=True, read_only=True)
-                        ws = wb.active
-                        data = list(ws.iter_rows(values_only=True))
-                        df_raw = pd.DataFrame(data)
-                    else:
-                        raise e
+                df_raw = read_excel_manual(uploaded_cf)
             else:
                 df_raw = pd.read_csv(uploaded_cf, header=None)
 
