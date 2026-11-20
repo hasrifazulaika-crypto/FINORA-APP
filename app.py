@@ -121,12 +121,22 @@ def _clean_headers(raw_headers):
 # FUNGSI MUTLAK PEMBACA EXCEL (BYPASS PANDAS ERROR)
 # ============================================================
 def read_excel_manual(uploaded_file):
-    """Membaca Excel murni via openpyxl tanpa menyentuh pd.read_excel()"""
+    """Membaca Excel murni via openpyxl, cari sheet yang paling banyak datanya."""
     uploaded_file.seek(0)
     wb = openpyxl.load_workbook(uploaded_file, data_only=True, read_only=True)
-    ws = wb.active
-    data = list(ws.iter_rows(values_only=True))
-    return pd.DataFrame(data)
+    
+    best_data = []
+    max_rows = 0
+    
+    # Loop semua sheet, ambil yang barisnya paling banyak
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        data = list(ws.iter_rows(values_only=True))
+        if len(data) > max_rows:
+            max_rows = len(data)
+            best_data = data
+            
+    return pd.DataFrame(best_data)
 
 def safe_read_dataframe(uploaded, header_row=0):
     """Membaca dataframe secara aman, kebal dari error duplikat kolom"""
