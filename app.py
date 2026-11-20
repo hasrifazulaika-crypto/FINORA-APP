@@ -885,7 +885,7 @@ def page_cash_flow():
         ]))
         elements.extend([summary_table, Spacer(1, 14), Paragraph("Rincian Data", heading_style)])
         if detail_df is not None and not detail_df.empty:
-            preview = detail_df.head(1000).copy()
+            preview = detail_df.head(30).copy()
             pdf_rows = [[str(c) for c in preview.columns]]
             for row in preview.itertuples(index=False, name=None):
                 pdf_rows.append([str(v)[:80] for v in row])
