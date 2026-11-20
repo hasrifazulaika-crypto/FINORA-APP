@@ -7,7 +7,7 @@ import os
 import io
 import base64
 import hashlib
-import re # <--- PERBAIKAN: Tambahan import re
+import re 
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
@@ -59,7 +59,6 @@ def format_rupiah(val):
     elif abs(val) >= 1_000_000: return f"Rp {val/1_000_000:,.2f} Jt"
     else: return f"Rp {val:,.0f}"
 
-# --- PERBAIKAN: Fungsi Clean Currency untuk Membersihkan Format Angka ---
 def clean_currency(x):
     """Fungsi untuk membersihkan teks angka (Rp, titik, koma) menjadi float murni"""
     if pd.isna(x):
@@ -68,31 +67,28 @@ def clean_currency(x):
         return float(x)
     
     x = str(x).strip()
-    # Deteksi jika minus berada di kurung (format akuntansi), misal: (1.000)
     is_negative = False
     if x.startswith('(') and x.endswith(')'):
         is_negative = True
         x = x[1:-1]
     
-    # Hapus karakter selain angka, minus, titik, dan koma
     x = re.sub(r'[^\d,.-]', '', x)
     
     if not x:
         return 0.0
         
-    # Logika pemisah desimal dan ribuan (Mendukung format Indo dan US)
     if ',' in x and '.' in x:
-        if x.rfind('.') > x.rfind(','): # Format US: 1,000.00
+        if x.rfind('.') > x.rfind(','): 
             x = x.replace(',', '')
-        else: # Format Indo: 1.000,00
+        else: 
             x = x.replace('.', '').replace(',', '.')
     elif ',' in x:
-        if len(x.split(',')[-1]) == 3: # Kemungkinan ribuan: 1,000
+        if len(x.split(',')[-1]) == 3: 
             x = x.replace(',', '')
-        else: # Kemungkinan desimal: 10,5
+        else: 
             x = x.replace(',', '.')
     elif '.' in x:
-        if len(x.split('.')[-1]) == 3 and x.count('.') > 0: # Kemungkinan ribuan: 1.000
+        if len(x.split('.')[-1]) == 3 and x.count('.') > 0: 
             x = x.replace('.', '')
             
     try:
@@ -200,16 +196,29 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
 # AUDIT ENGINE
 # ============================================================
 def auto_detect_columns(df):
-    mapping = {"date": None, "amount": None, "desc": None, "debit": None, "credit": None, "budget": None, "invoice": None}
+    """Deteksi kolom super pintar, memaksa pilih kolom pertama jika gagal"""
+    mapping = {"date": None, "amount": None, "desc": None, "budget": None, "invoice": None}
+    
+    # 1. Berdasarkan Nama Kolom
     for col in df.columns:
         c = str(col).lower()
         if not mapping["date"] and any(k in c for k in ["tanggal", "tgl", "date", "waktu", "periode"]): mapping["date"] = col
-        if not mapping["amount"] and any(k in c for k in ["actual", "realisasi", "nominal", "jumlah", "total", "nilai", "amount", "harga"]): mapping["amount"] = col
+        if not mapping["amount"] and any(k in c for k in ["actual", "realisasi", "nominal", "jumlah", "total", "nilai", "amount", "harga", "debit", "kredit"]): mapping["amount"] = col
         if not mapping["budget"] and any(k in c for k in ["anggaran", "budget", "pagu"]): mapping["budget"] = col
         if not mapping["desc"] and any(k in c for k in ["deskripsi", "keterangan", "uraian", "category", "kategori", "nama", "item", "barang"]): mapping["desc"] = col
-        if not mapping["debit"] and any(k in c for k in ["debit", "masuk", "pemasukan", "in"]): mapping["debit"] = col
-        if not mapping["credit"] and any(k in c for k in ["kredit", "keluar", "pengeluaran", "out"]): mapping["credit"] = col
         if not mapping["invoice"] and any(k in c for k in ["invoice", "faktur", "nota", "ref", "no."]): mapping["invoice"] = col
+        
+    # 2. Berdasarkan Isi Data (Mengakali 'Unnamed')
+    for col in df.columns:
+        sample = df[col].dropna().astype(str).head(20)
+        if sample.empty: continue
+        if not mapping["date"] and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5: mapping["date"] = col
+        elif not mapping["amount"] and col != mapping["date"] and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5: mapping["amount"] = col
+            
+    # 3. Fallback Posisi (Paksa isi agar tidak ada warning)
+    if not mapping["date"] and len(df.columns) > 0: mapping["date"] = df.columns[0]
+    if not mapping["amount"] and len(df.columns) > 1: mapping["amount"] = df.columns[1]
+    
     return mapping
 
 def audit_empty(df, cols_to_check):
@@ -584,14 +593,15 @@ def page_audit():
         df = pd.read_excel(uploaded, header=header_row) if uploaded.name.endswith('xlsx') else pd.read_csv(uploaded, header=header_row)
         detected = auto_detect_columns(df)
         st.markdown("### 2. Pemetaan Kolom")
-        with st.expander("⚙️ Koreksi Pemetaan Kolom", expanded=False):
+        st.success("✨ FINORA AI telah mendeteksi otomatis kolom.")
+        with st.expander("⚙️ Koreksi Pemetaan Kolom (Klik Jika Perlu)", expanded=False):
             c1, c2 = st.columns(2)
-            date_col = c1.selectbox("Kolom Tanggal", [""] + list(df.columns), index=list(df.columns).index(detected["date"])+1 if detected["date"] else 0)
-            desc_col = c2.selectbox("Kolom Deskripsi", [""] + list(df.columns), index=list(df.columns).index(detected["desc"])+1 if detected["desc"] else 0)
+            date_col = c1.selectbox("Kolom Tanggal", list(df.columns), index=list(df.columns).index(detected["date"]) if detected["date"] in list(df.columns) else 0)
+            desc_col = c2.selectbox("Kolom Deskripsi", [""] + list(df.columns), index=list(df.columns).index(detected["desc"])+1 if detected["desc"] in list(df.columns) else 0)
             c3, c4, c5 = st.columns(3)
-            amount_col = c3.selectbox("Kolom Nominal", [""] + list(df.columns), index=list(df.columns).index(detected["amount"])+1 if detected["amount"] else 0)
-            budget_col = c4.selectbox("Kolom Anggaran", [""] + list(df.columns), index=list(df.columns).index(detected["budget"])+1 if detected["budget"] else 0)
-            invoice_col = c5.selectbox("Kolom No. Faktur", [""] + list(df.columns), index=list(df.columns).index(detected["invoice"])+1 if detected["invoice"] else 0)
+            amount_col = c3.selectbox("Kolom Nominal", list(df.columns), index=list(df.columns).index(detected["amount"]) if detected["amount"] in list(df.columns) else 0)
+            budget_col = c4.selectbox("Kolom Anggaran", [""] + list(df.columns), index=list(df.columns).index(detected["budget"])+1 if detected["budget"] in list(df.columns) else 0)
+            invoice_col = c5.selectbox("Kolom No. Faktur", [""] + list(df.columns), index=list(df.columns).index(detected["invoice"])+1 if detected["invoice"] in list(df.columns) else 0)
         st.markdown("### 3. Informasi KKA")
         c_kka1, c_kka2 = st.columns(2)
         entitas = c_kka1.text_input("Nama Entitas / Perusahaan", placeholder="Contoh: PT Maju Jaya", key="audit_entitas")
@@ -600,11 +610,9 @@ def page_audit():
         if st.button("🚀 JALANKAN PROSEDUR AUDIT", use_container_width=True):
             with st.spinner("Memproses data..."):
                 
-                # --- PERBAIKAN: Membersihkan format angka sebelum audit ---
                 if amount_col: df[amount_col] = df[amount_col].apply(clean_currency)
                 if budget_col: df[budget_col] = df[budget_col].apply(clean_currency)
                 if invoice_col: df[invoice_col] = df[invoice_col].astype(str)
-                # ---------------------------------------------------------
                 
                 all_findings, flagged_data = [], {}
                 f, flag = audit_empty(df, [c for c in [date_col, amount_col, desc_col] if c]); all_findings.extend(f); flagged_data["Kelengkapan Kosong"] = flag
@@ -722,74 +730,76 @@ def page_cash_flow():
     if uploaded_cf:
         df_cf = pd.read_excel(uploaded_cf, header=header_row_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_row_cf)
         
-        # --- PERBAIKAN: AI AUTO DETECT LEBIH PINTAR (Membaca isi data jika nama kolom 'Unnamed') ---
+        # --- SISTEM DETEKSI PAKSA (TIDAK MUNGKIN GAGAL) ---
         auto_tgl, auto_ket, auto_nom = "", "", ""
         
-        # 1. Berdasarkan Nama Kolom
+        # 1. Cari berdasarkan Nama Kolom
         for c in df_cf.columns:
             c_low = str(c).lower()
             if not auto_tgl and any(k in c_low for k in ["tanggal", "tgl", "date", "waktu", "periode"]): auto_tgl = c
-            if not auto_ket and any(k in c_low for k in ["keterangan", "deskripsi", "uraian", "nama", "category", "kategori", "transaksi"]): auto_ket = c
+            if not auto_ket and any(k in c_low for k in ["keterangan", "deskripsi", "uraian", "nama", "category", "kategori", "transaksi", "ket"]): auto_ket = c
             if not auto_nom and any(k in c_low for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit", "mutasi", "total"]): auto_nom = c
             
-        # 2. Jika gagal, tebak berdasarkan isi data
+        # 2. Cari berdasarkan Isi Data
         for c in df_cf.columns:
-            sample = df_cf[c].dropna().head(15).astype(str)
+            sample = df_cf[c].dropna().head(20).astype(str)
             if sample.empty: continue
             
             if not auto_tgl and pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5:
                 auto_tgl = c
-            elif not auto_nom and sample.str.contains(r'\d').sum() > len(sample) * 0.5:
+            elif not auto_nom and c != auto_tgl and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5:
                 auto_nom = c
-        # ----------------------------------------------------------------------------------------
-        
-        st.markdown("### 2. Pemetaan Kolom (Wajib)")
-        st.info("✨ FINORA AI telah mendeteksi otomatis kolom. Jika ada yang salah, silakan koreksi di bawah ini.")
-        
-        c3, c4, c5 = st.columns(3)
-        col_tgl = c3.selectbox("Kolom Tanggal", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl)+1 if auto_tgl else 0)
-        col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket else 0)
-        col_nom = c5.selectbox("Kolom Nominal", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_nom)+1 if auto_nom else 0)
-        
-        if not col_tgl or not col_nom:
-            st.warning("⚠️ Silakan pilih Kolom Tanggal dan Kolom Nominal terlebih dahulu di menu di atas.")
-        else:
-            # Proses Data
-            df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce')
-            
-            # --- PERBAIKAN: Menggunakan clean_currency untuk baca nominal ---
-            df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
-            # -----------------------------------------------------------------
-            
-            df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
-            
-            if col_ket:
-                df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
-            else:
-                df_cf['Kategori'] = 'Lainnya'
                 
-            st.success(f"✨ Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
+        # 3. PAKSA ISI (Fallback Posisi) -> Biar warning "Choose an option" hilang
+        if not auto_tgl: auto_tgl = df_cf.columns[0]
+        if not auto_nom: auto_nom = df_cf.columns[1] if len(df_cf.columns) > 1 else df_cf.columns[0]
+        if not auto_ket:
+            for c in df_cf.columns:
+                if c not in [auto_tgl, auto_nom]: auto_ket = c; break
+        
+        st.markdown("### 2. Pemetaan Kolom (Otomatis)")
+        st.success("✨ FINORA AI telah mendeteksi kolom secara otomatis. Kamu bisa langsung menjalankan analisis.")
+        
+        # Tampilkan pilihan di dalam Expander (Tertutup rapi)
+        with st.expander("⚙️ Lihat / Koreksi Pemetaan Kolom", expanded=False):
+            c3, c4, c5 = st.columns(3)
+            col_tgl = c3.selectbox("Kolom Tanggal", list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl))
+            col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket in list(df_cf.columns) else 0)
+            col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom))
+        
+        # --- LANGSUNG PROSES TANPA WARNING ---
+        df_cf[col_tgl] = pd.to_datetime(df_cf[col_tgl], errors='coerce')
+        df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
+        
+        df_cf = df_cf.dropna(subset=[col_tgl]).sort_values(by=col_tgl)
+        
+        if col_ket:
+            df_cf['Kategori'] = df_cf[col_ket].astype(str).str.strip()
+        else:
+            df_cf['Kategori'] = 'Lainnya'
             
-            st.markdown("### 3. Pengaturan Saldo Awal")
-            saldo_awal = st.number_input("Masukkan Saldo Kas Awal (Rp)", min_value=0, value=10000000, step=1000000)
-            
-            if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
-                with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
-                    df_cf['Running Balance'] = saldo_awal + df_cf[col_nom].cumsum()
-                    total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
-                    total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
-                    saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else saldo_awal
-                    
-                    bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
-                    burn_rate = abs(total_keluar) / bulan_unik
-                    bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
-                    
-                    st.session_state['cf_results'] = {
-                        "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
-                        "total_masuk": total_masuk, "total_keluar": total_keluar, 
-                        "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
-                        "bulan_bertahan": bulan_bertahan, "saldo_awal": saldo_awal
-                    }
+        st.info(f"📊 Data berhasil dibaca! (Terdeteksi {len(df_cf)} baris mutasi).")
+        
+        st.markdown("### 3. Pengaturan Saldo Awal")
+        saldo_awal = st.number_input("Masukkan Saldo Kas Awal (Rp)", min_value=0, value=10000000, step=1000000)
+        
+        if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
+            with st.spinner("Menghitung Running Balance & Cash Burn Rate..."):
+                df_cf['Running Balance'] = saldo_awal + df_cf[col_nom].cumsum()
+                total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
+                total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
+                saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else saldo_awal
+                
+                bulan_unik = max(1, df_cf[col_tgl].dt.to_period('M').nunique())
+                burn_rate = abs(total_keluar) / bulan_unik
+                bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
+                
+                st.session_state['cf_results'] = {
+                    "df": df_cf, "col_tgl": col_tgl, "col_nom": col_nom, 
+                    "total_masuk": total_masuk, "total_keluar": total_keluar, 
+                    "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
+                    "bulan_bertahan": bulan_bertahan, "saldo_awal": saldo_awal
+                }
 
     if 'cf_results' in st.session_state:
         res_cf = st.session_state['cf_results']
