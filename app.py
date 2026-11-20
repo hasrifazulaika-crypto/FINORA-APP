@@ -698,12 +698,69 @@ def page_financial_analysis():
 def page_cash_flow():
     finora_header("Cash Flow Intelligence", "Prediksi Likuiditas & Analisis Arus Kas Mendatang")
     
-    st.markdown("### 1. Upload Data Transaksi")
+    st.markdown("### 1. Upload Data Transaksi / Laporan")
     c1, c2 = st.columns([3, 1])
-    uploaded_cf = c1.file_uploader("Upload File Excel/CSV Mutasi Bank/Kas", type=["xlsx", "csv"], key="cf_upload")
+    uploaded_cf = c1.file_uploader("Upload File Excel/CSV (Mutasi Bank ATAU Laporan Arus Kas)", type=["xlsx", "csv"], key="cf_upload")
     header_row_cf = c2.number_input("Header di baris ke-", min_value=0, value=0, key="cf_header", help="Ubah ke 1 atau 2 jika baris pertama Excel adalah Judul.")
     
     if uploaded_cf:
+        # --- SMART DETECTION: Cek apakah ini Laporan Arus Kas (Summary) atau Mutasi Bank ---
+        raw_df = pd.read_excel(uploaded_cf, header=None, nrows=10) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=None, nrows=10)
+        
+        is_statement = False
+        header_idx = header_row_cf
+        for i, row in raw_df.iterrows():
+            row_str = row.astype(str).str.lower().tolist()
+            if any("uraian" in cell or "keterangan" in cell for cell in row_str):
+                is_statement = True
+                header_idx = i
+                break
+                
+        if is_statement:
+            st.info("📄 **Terdeteksi: Laporan Arus Kas Komparatif.** Aplikasi akan menampilkan ringkasan laporan (bukan grafik harian).")
+            df_cf = pd.read_excel(uploaded_cf, header=header_idx) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_idx)
+            
+            # Cari kolom Uraian
+            col_uraian = next((c for c in df_cf.columns if "uraian" in str(c).lower() or "keterangan" in str(c).lower()), df_cf.columns[1] if len(df_cf.columns) > 1 else df_cf.columns[0])
+            # Cari kolom Tahun
+            col_2024 = next((c for c in df_cf.columns if "2024" in str(c)), None)
+            col_2023 = next((c for c in df_cf.columns if "2023" in str(c)), None)
+            
+            if col_2024: df_cf[col_2024] = df_cf[col_2024].apply(clean_currency)
+            if col_2023: df_cf[col_2023] = df_cf[col_2023].apply(clean_currency)
+            
+            # Bersihkan baris kosong
+            df_cf = df_cf.dropna(subset=[col_uraian])
+            df_cf = df_cf[df_cf[col_uraian].astype(str).str.strip() != ""]
+            
+            st.write("### Ringkasan Laporan")
+            preview_cols = [col_uraian]
+            if col_2024: preview_cols.append(col_2024)
+            if col_2023: preview_cols.append(col_2023)
+            st.dataframe(df_cf[preview_cols].reset_index(drop=True), use_container_width=True)
+            
+            # Filter baris utama untuk grafik
+            main_rows = df_cf[df_cf[col_uraian].astype(str).str.contains("Arus Kas Bersih|Kenaikan|Penurunan|Saldo Kas", case=False, na=False)]
+            
+            if not main_rows.empty:
+                fig = go.Figure()
+                if col_2024: fig.add_trace(go.Bar(name='Tahun 2024', x=main_rows[col_uraian], y=main_rows[col_2024], marker_color='#FF5C8B'))
+                if col_2023: fig.add_trace(go.Bar(name='Tahun 2023', x=main_rows[col_uraian], y=main_rows[col_2023], marker_color='#7A1F3D'))
+                fig.update_layout(barmode='group', title="Perbandingan Arus Kas Utama", height=500)
+                st.plotly_chart(fig, use_container_width=True)
+                
+            st.markdown("### 🤖 AI Cash Flow Advisor")
+            if st.button("Analisis Laporan Arus Kas dengan AI", use_container_width=True):
+                context = "Data Laporan Arus Kas:\n"
+                for _, row in main_rows.iterrows():
+                    val_24 = row[col_2024] if col_2024 else 0
+                    val_23 = row[col_2023] if col_2023 else 0
+                    context += f"- {row[col_uraian]}: 2024 = Rp {val_24:,.0f}, 2023 = Rp {val_23:,.0f}\n"
+                prompt = "Berikan analisis profesional mengenai kesehatan arus kas perusahaan berdasarkan data komparatif ini. Soroti tren operasi, investasi, pendanaan, dan berikan rekomendasi strategis."
+                with st.chat_message("assistant"): st.write_stream(ask_gemini_stream(prompt, context, system_role="Analis Arus Kas Ahli"))
+            return # Hentikan eksekusi, jangan lanjut ke logika transaksi harian
+            
+        # --- LOGIKA MUTASI BANK (TRANSAKSI HARIAN) ---
         df_cf = pd.read_excel(uploaded_cf, header=header_row_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_row_cf)
         
         auto_tgl, auto_ket, auto_nom = "", "", ""
@@ -736,21 +793,20 @@ def page_cash_flow():
             col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket in list(df_cf.columns) else 0)
             col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom) if auto_nom in list(df_cf.columns) else 0)
             
-        # --- PERBAIKAN: SISTEM PARSING TANGGAL YANG TIDAK MUDAH MENYERAH ---
         st.markdown("---")
         if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
             with st.spinner("Memproses data..."):
-                # 1. Parse Tanggal (Coba format standar, lalu coba format Excel Serial)
-                df_cf['_parsed_date'] = pd.to_datetime(df_cf[col_tgl], errors='coerce', dayfirst=True)
-                if df_cf['_parsed_date'].isna().all():
-                    df_cf['_parsed_date'] = pd.to_datetime(df_cf[col_tgl], errors='coerce', unit='D', origin='1899-12-30')
+                try:
+                    df_cf['_parsed_date'] = pd.to_datetime(df_cf[col_tgl], errors='coerce', dayfirst=True)
+                    if df_cf['_parsed_date'].isna().all() and pd.api.types.is_numeric_dtype(df_cf[col_tgl]):
+                        df_cf['_parsed_date'] = pd.to_datetime(df_cf[col_tgl], errors='coerce', unit='D', origin='1899-12-30')
+                except Exception:
+                    df_cf['_parsed_date'] = pd.NaT
 
-                # 2. Parse Nominal
                 df_cf[col_nom] = df_cf[col_nom].apply(clean_currency)
 
-                # 3. Cek apakah gagal total
                 if df_cf['_parsed_date'].isna().all():
-                    st.error(f"❌ Gagal membaca kolom tanggal **{col_tgl}**. Pastikan kolom tersebut berisi tanggal (contoh: 2023-01-01 atau 01/01/2023). Silakan ganti pilihan kolom di menu 'Koreksi Pemetaan Kolom' di atas.")
+                    st.error(f"❌ Gagal membaca kolom tanggal **{col_tgl}**. Pastikan kolom tersebut berisi tanggal. Silakan ganti pilihan kolom di menu 'Koreksi Pemetaan Kolom' di atas.")
                 else:
                     df_cf = df_cf.dropna(subset=['_parsed_date']).sort_values(by='_parsed_date')
                     if col_ket:
@@ -758,7 +814,6 @@ def page_cash_flow():
                     else:
                         df_cf['Kategori'] = 'Lainnya'
 
-                    # Simpan ke session state
                     total_masuk = df_cf[df_cf[col_nom] > 0][col_nom].sum()
                     total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
                     df_cf['Running Balance'] = df_cf[col_nom].cumsum()
@@ -777,7 +832,6 @@ def page_cash_flow():
                     st.success("✅ Analisis berhasil dijalankan!")
                     st.rerun()
 
-        # Preview Data Selalu Muncul (sebelum dijalankan) untuk ngecek
         with st.expander("👀 Preview Data Mentah (Buka jika hasil 0)", expanded=False):
             st.write(f"Preview kolom **{col_tgl}** (Tanggal) dan **{col_nom}** (Nominal):")
             preview_cols = [col_tgl, col_nom]
