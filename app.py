@@ -705,13 +705,13 @@ def page_cash_flow():
     
     if uploaded_cf:
         try:
-            # --- SMART DETECTION: Cek apakah ini Laporan Arus Kas (Summary) atau Mutasi Bank ---
-            raw_df = pd.read_excel(uploaded_cf, header=None, nrows=15) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=None, nrows=15)
+            # --- SMART DETECTION & FIX DUPLICATE COLUMNS ---
+            # Kita baca file tanpa header dulu agar Pandas tidak error saat ada nama kolom ganda
+            df_raw = pd.read_excel(uploaded_cf, header=None) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=None)
             
             is_statement = False
             header_idx = header_row_cf
-            for i, row in raw_df.iterrows():
-                # Safe string conversion for each cell
+            for i, row in df_raw.head(20).iterrows():
                 row_str = [str(cell).lower() for cell in row.values if pd.notna(cell)]
                 if any("uraian" in cell or "keterangan" in cell for cell in row_str):
                     is_statement = True
@@ -720,7 +720,23 @@ def page_cash_flow():
                     
             if is_statement:
                 st.info("📄 **Terdeteksi: Laporan Arus Kas Komparatif.** Aplikasi akan menampilkan ringkasan laporan.")
-                df_cf = pd.read_excel(uploaded_cf, header=header_idx) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_idx)
+                
+                # Ambil baris header dan bersihkan jika ada duplikat
+                headers = df_raw.iloc[header_idx].tolist()
+                clean_headers = []
+                for j, h in enumerate(headers):
+                    h_str = str(h).strip()
+                    if h_str == 'nan' or h_str == '':
+                        h_str = f"Unnamed_{j}"
+                    # Cek jika sudah ada nama yang sama, tambahkan _2, _3, dst.
+                    if h_str in clean_headers:
+                        h_str = f"{h_str}_{j}"
+                    clean_headers.append(h_str)
+                
+                # Buat dataframe baru mulai dari baris setelah header
+                df_cf = df_raw.iloc[header_idx+1:].copy()
+                df_cf.columns = clean_headers
+                df_cf = df_cf.reset_index(drop=True)
                 
                 # Cari kolom Uraian
                 col_uraian = next((c for c in df_cf.columns if "uraian" in str(c).lower() or "keterangan" in str(c).lower()), None)
