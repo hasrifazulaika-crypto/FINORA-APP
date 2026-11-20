@@ -13,10 +13,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from google import genai
 
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer,
+    Table, LongTable, TableStyle
 
 # ============================================================
 # CONFIG & STYLE GLOBAL
