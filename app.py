@@ -939,8 +939,37 @@ def page_cash_flow():
             return float(max(matched_vals))
         return 0.0
 
+    def _normalize_account_text(text):
+        s = str(text).lower().strip()
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        replacements = [
+            (r"\bkewajiban\b", "liabilitas"),
+            (r"\bhutang\b", "utang"),
+            (r"\bjangka pendek\b", "lancar"),
+            (r"\bcurrent\b", "lancar"),
+            (r"\bliabilities\b", "liabilitas"),
+            (r"\bliability\b", "liabilitas"),
+            (r"\brevenues?\b", "pendapatan"),
+            (r"\bsales\b", "penjualan"),
+            (r"\bomset\b", "pendapatan"),
+            (r"\bpelanggan\b", "pelanggan"),
+            (r"\bpinjaman\b", "utang"),
+            (r"\bloans?\b", "utang"),
+            (r"\bborrowings?\b", "utang"),
+            (r"\binterest\b", "bunga"),
+            (r"\bdebt\b", "utang"),
+            (r"\bpemasok\b", "pemasok"),
+            (r"\bsuppliers?\b", "pemasok"),
+            (r"\bneto\b", "bersih"),
+            (r"\bnet\b", "bersih"),
+            (r"\bjumlah\b", "total"),
+        ]
+        for pat, rep in replacements:
+            s = re.sub(pat, rep, s)
+        return re.sub(r"\s+", " ", s).strip()
+
     def extract_cf_ratio_inputs(df_data, desc_col_name, period_cols, line_items=None):
-        """Ekstrak otomatis nilai pendukung rasio arus kas (pendapatan, liabilitas lancar, total utang, debt service) dari file."""
+        """Ekstrak otomatis nilai pendukung rasio arus kas dari seluruh baris/akun di file."""
         extracted = {
             "revenue": 0.0,
             "current_liabilities": 0.0,
@@ -951,68 +980,149 @@ def page_cash_flow():
                 "current_liabilities": "-",
                 "total_debt": "-",
                 "debt_service": "-",
-            }
+            },
+            "modes": {
+                "revenue": "missing",
+                "current_liabilities": "missing",
+                "total_debt": "missing",
+                "debt_service": "missing",
+            },
+            "all_detected_accounts": []
         }
         if desc_col_name not in df_data.columns or not period_cols:
             return extracted
 
-        patterns = {
+        other_text_cols = [
+            c for c in df_data.columns
+            if c != desc_col_name and c not in period_cols
+            and not pd.api.types.is_numeric_dtype(df_data[c])
+        ]
+        code_col = other_text_cols[0] if other_text_cols else None
+
+        priority_rules = {
             "revenue": [
-                "total pendapatan", "jumlah pendapatan", "pendapatan usaha", "pendapatan neto",
-                "pendapatan bersih", "pendapatan", "penjualan bersih", "penjualan neto",
-                "penjualan", "revenue", "sales", "omzet", "penerimaan kas dari pelanggan",
-                "penerimaan dari pelanggan", "penerimaan pelanggan"
+                (5, ["total pendapatan", "total penjualan", "pendapatan usaha", "pendapatan bersih", "penjualan bersih"]),
+                (4, ["penerimaan kas dari pelanggan", "penerimaan dari pelanggan", "pendapatan operasional", "penerimaan pelanggan"]),
+                (3, ["pendapatan", "penjualan", "omzet", "hasil usaha"]),
+                (2, ["penerimaan bunga", "hasil penjualan", "kas masuk"]),
             ],
             "current_liabilities": [
-                "total liabilitas lancar", "jumlah liabilitas lancar", "liabilitas lancar",
-                "total liabilitas jangka pendek", "jumlah liabilitas jangka pendek",
-                "liabilitas jangka pendek", "utang lancar", "utang jangka pendek",
-                "kewajiban lancar", "kewajiban jangka pendek", "current liabilities", "current liability"
+                (5, ["total liabilitas lancar", "total utang lancar"]),
+                (4, ["liabilitas lancar", "utang lancar", "utang usaha", "utang dagang"]),
+                (3, ["pembayaran kas kepada pemasok", "beban operasional", "gaji", "pajak penghasilan", "beban akrual"]),
+                (2, ["liabilitas", "kewajiban", "pembayaran kas"]),
             ],
             "total_debt": [
-                "total utang", "jumlah utang", "total liabilitas", "jumlah liabilitas",
-                "total kewajiban", "jumlah kewajiban", "utang berbunga", "pinjaman jangka panjang",
-                "pinjaman jangka pendek", "pinjaman bank", "utang bank", "pinjaman",
-                "obligasi", "sukuk", "total debt", "total liabilities"
+                (5, ["total utang", "total liabilitas", "total utang berbunga"]),
+                (4, ["pinjaman bank", "pembiayaan", "utang bank", "utang obligasi", "utang jangka panjang"]),
+                (3, ["pembayaran pokok pinjaman", "pelunasan utang", "liabilitas sewa", "angsuran"]),
+                (2, ["utang", "pinjaman", "dividen"]),
             ],
             "debt_service": [
-                "pembayaran pokok utang", "pembayaran utang", "pelunasan utang", "pelunasan pinjaman",
-                "pembayaran pinjaman", "pembayaran kembali pinjaman", "pembayaran liabilitas sewa",
-                "bunga dibayar", "pembayaran bunga", "beban bunga", "biaya keuangan", "angsuran"
+                (5, ["pembayaran pokok pinjaman", "pembayaran pokok utang", "pelunasan utang", "pembayaran bunga", "bunga dibayar"]),
+                (4, ["beban bunga", "biaya bunga", "biaya keuangan", "angsuran utang", "cicilan utang"]),
+                (3, ["pembayaran dividen", "bunga", "angsuran", "cicilan", "pelunasan"]),
             ],
         }
 
         matched = {k: [] for k in ["revenue", "current_liabilities", "total_debt", "debt_service"]}
         for _, r in df_data.iterrows():
             raw_txt = str(r[desc_col_name]).strip()
-            txt = raw_txt.lower()
-            if not txt or txt in ("nan", "none"):
+            if not raw_txt or raw_txt.lower() in ("nan", "none"):
                 continue
-            for key, pats in patterns.items():
-                if any(pat in txt for pat in pats):
-                    row_total = sum(abs(to_number(r[p])) for p in period_cols if p in df_data.columns)
-                    if row_total > 0:
-                        matched[key].append((row_total, raw_txt))
+
+            code_txt = str(r[code_col]).strip() if code_col and pd.notna(r[code_col]) and str(r[code_col]).strip().lower() not in ("nan", "none", "") else ""
+            extra_txt = " ".join(
+                str(r[c]).strip() for c in other_text_cols
+                if c != code_col and pd.notna(r[c]) and str(r[c]).strip().lower() not in ("nan", "none", "")
+            )
+            combined_raw = f"[{code_txt}] {raw_txt}" if code_txt else raw_txt
+            if extra_txt:
+                combined_raw = f"{combined_raw} ({extra_txt})"
+            norm_txt = _normalize_account_text(f"{raw_txt} {extra_txt}")
+
+            period_vals_map = {}
+            non_zero_vals = []
+            for p in period_cols:
+                if p in df_data.columns:
+                    v_num = to_number(r[p])
+                    period_vals_map[str(p)] = v_num
+                    if abs(v_num) > 0:
+                        non_zero_vals.append(abs(v_num))
+
+            if non_zero_vals:
+                extracted["all_detected_accounts"].append({
+                    "Kode": code_txt if code_txt else "-",
+                    "Akun / Uraian": raw_txt,
+                    **{str(p): format_rupiah(period_vals_map[str(p)]) for p in period_cols if str(p) in period_vals_map}
+                })
+                row_val = float(sum(non_zero_vals)) if len(period_cols) == 1 else float(max(non_zero_vals))
+                for key, tiers in priority_rules.items():
+                    best_prio = 0
+                    for prio, pats in tiers:
+                        if any(_normalize_account_text(pat) in norm_txt for pat in pats):
+                            best_prio = prio
+                            break
+                    if best_prio > 0:
+                        matched[key].append((best_prio, row_val, combined_raw))
 
         for key in matched:
             if matched[key]:
-                best_val, best_label = max(matched[key], key=lambda item: item[0])
+                _, best_val, best_label = max(matched[key], key=lambda item: (item[0], item[1]))
                 extracted[key] = float(best_val)
                 extracted["sources"][key] = best_label
+                extracted["modes"][key] = "direct"
 
-        # Fallback debt_service dari pos arus kas keluar terkait pinjaman/bunga/sewa jika tidak ada baris ringkasan
-        if extracted["debt_service"] == 0.0 and line_items:
-            ds_items = [
-                (abs(float(x.get("Nilai", 0.0))), str(x.get("Uraian", "")))
-                for x in line_items
-                if any(k in str(x.get("Uraian", "")).lower() for k in [
-                    "pinjaman", "utang bank", "obligasi", "bunga", "sewa pembiayaan", "liabilitas sewa", "angsuran"
-                ])
-                and float(x.get("Nilai", 0.0)) < 0
-            ]
-            if ds_items:
-                extracted["debt_service"] = float(sum(v for v, _ in ds_items))
-                extracted["sources"]["debt_service"] = ", ".join(dict.fromkeys(lbl for _, lbl in ds_items[:3]))
+        # Fallback dari pos arus kas yang terklasifikasi jika akun spesifik belum ditemukan
+        if line_items:
+            if extracted["revenue"] == 0.0:
+                op_inflows = [
+                    (abs(float(x.get("Nilai", 0.0))), str(x.get("Uraian", "")))
+                    for x in line_items
+                    if str(x.get("Aktivitas", "")).lower() == "operasi" and float(x.get("Nilai", 0.0)) > 0
+                ]
+                if op_inflows:
+                    extracted["revenue"] = float(sum(v for v, _ in op_inflows))
+                    extracted["sources"]["revenue"] = "Proksi Kas Masuk Operasi (" + ", ".join(dict.fromkeys(lbl for _, lbl in op_inflows[:2])) + ")"
+                    extracted["modes"]["revenue"] = "proxy"
+
+            if extracted["current_liabilities"] == 0.0:
+                op_outflows = [
+                    (abs(float(x.get("Nilai", 0.0))), str(x.get("Uraian", "")))
+                    for x in line_items
+                    if str(x.get("Aktivitas", "")).lower() == "operasi" and float(x.get("Nilai", 0.0)) < 0
+                ]
+                if op_outflows:
+                    extracted["current_liabilities"] = float(sum(v for v, _ in op_outflows))
+                    extracted["sources"]["current_liabilities"] = "Proksi Kas Keluar Operasi (" + ", ".join(dict.fromkeys(lbl for _, lbl in op_outflows[:3])) + ")"
+                    extracted["modes"]["current_liabilities"] = "proxy"
+
+            if extracted["debt_service"] == 0.0:
+                ds_items = [
+                    (abs(float(x.get("Nilai", 0.0))), str(x.get("Uraian", "")))
+                    for x in line_items
+                    if any(k in _normalize_account_text(str(x.get("Uraian", ""))) for k in [
+                        "utang", "bunga", "sewa", "angsuran", "cicilan", "pelunasan", "dividen"
+                    ])
+                    and float(x.get("Nilai", 0.0)) < 0
+                ]
+                if ds_items:
+                    extracted["debt_service"] = float(sum(v for v, _ in ds_items))
+                    extracted["sources"]["debt_service"] = ", ".join(dict.fromkeys(lbl for _, lbl in ds_items[:3]))
+                    extracted["modes"]["debt_service"] = "proxy"
+
+            if extracted["total_debt"] == 0.0:
+                debt_items = [
+                    (abs(float(x.get("Nilai", 0.0))), str(x.get("Uraian", "")))
+                    for x in line_items
+                    if any(k in _normalize_account_text(str(x.get("Uraian", ""))) for k in [
+                        "utang", "pinjaman", "pembiayaan", "obligasi", "sewa"
+                    ])
+                ]
+                if debt_items:
+                    extracted["total_debt"] = float(sum(v for v, _ in debt_items))
+                    extracted["sources"]["total_debt"] = "Proksi Akun Pinjaman/Utang (" + ", ".join(dict.fromkeys(lbl for _, lbl in debt_items[:2])) + ")"
+                    extracted["modes"]["total_debt"] = "proxy"
 
         return extracted
 
@@ -1299,6 +1409,7 @@ def page_cash_flow():
                 srcs = auto_inputs["sources"]
                 total_fcf = sum(saved["results"][p]["fcf"] for p in periods)
 
+                modes = auto_inputs.get("modes", {})
                 ratios = {
                     "Cash Flow Margin (%)": round(total_cfo / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia di file",
                     "Operating Cash Flow Ratio (x)": round(total_cfo / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia di file",
@@ -1307,19 +1418,26 @@ def page_cash_flow():
                     "Free Cash Flow (Rp)": total_fcf,
                 }
 
+                def _sub_with_mode(key_name, fallback_hint):
+                    if modes.get(key_name) == "direct":
+                        return f"Sumber: {srcs[key_name]}"
+                    if modes.get(key_name) == "proxy":
+                        return f"Estimasi Otomatis • {srcs[key_name]}"
+                    return fallback_hint
+
                 ratio_cards_meta = [
                     ("Free Cash Flow (Rp)", ratios["Free Cash Flow (Rp)"], "Kas Neto Operasi − Belanja Modal (CapEx)",
                      "Surplus Kas Bebas" if total_fcf >= 0 else "Defisit Kas Bebas", "badge-ok" if total_fcf >= 0 else "badge-warn"),
-                    ("Cash Flow Margin (%)", ratios["Cash Flow Margin (%)"], f"Sumber: {srcs['revenue']}" if revenue > 0 else "Butuh pos Pendapatan / Penerimaan Pelanggan di file",
+                    ("Cash Flow Margin (%)", ratios["Cash Flow Margin (%)"], _sub_with_mode("revenue", "Butuh pos Pendapatan / Penerimaan Pelanggan di file"),
                      "Efisien" if isinstance(ratios["Cash Flow Margin (%)"], float) and ratios["Cash Flow Margin (%)"] >= 10 else "Perlu Perhatian",
                      "badge-ok" if isinstance(ratios["Cash Flow Margin (%)"], float) and ratios["Cash Flow Margin (%)"] >= 10 else "badge-warn"),
-                    ("Operating Cash Flow Ratio (x)", ratios["Operating Cash Flow Ratio (x)"], f"Sumber: {srcs['current_liabilities']}" if current_liabilities > 0 else "Butuh pos Liabilitas Lancar di file",
+                    ("Operating Cash Flow Ratio (x)", ratios["Operating Cash Flow Ratio (x)"], _sub_with_mode("current_liabilities", "Butuh pos Liabilitas Lancar di file"),
                      "Likuid (≥ 1.0x)" if isinstance(ratios["Operating Cash Flow Ratio (x)"], float) and ratios["Operating Cash Flow Ratio (x)"] >= 1.0 else "Ketat (< 1.0x)",
                      "badge-ok" if isinstance(ratios["Operating Cash Flow Ratio (x)"], float) and ratios["Operating Cash Flow Ratio (x)"] >= 1.0 else "badge-warn"),
-                    ("Cash Flow to Debt Ratio (%)", ratios["Cash Flow to Debt Ratio (%)"], f"Sumber: {srcs['total_debt']}" if total_debt > 0 else "Butuh pos Total Utang / Liabilitas di file",
+                    ("Cash Flow to Debt Ratio (%)", ratios["Cash Flow to Debt Ratio (%)"], _sub_with_mode("total_debt", "Butuh pos Total Utang / Liabilitas di file"),
                      "Sehat (≥ 20%)" if isinstance(ratios["Cash Flow to Debt Ratio (%)"], float) and ratios["Cash Flow to Debt Ratio (%)"] >= 20 else "Leverage Tinggi",
                      "badge-ok" if isinstance(ratios["Cash Flow to Debt Ratio (%)"], float) and ratios["Cash Flow to Debt Ratio (%)"] >= 20 else "badge-warn"),
-                    ("Cash Flow Coverage (x)", ratios["Cash Flow Coverage (x)"], f"Sumber: {srcs['debt_service']}" if debt_service > 0 else "Butuh pos Pembayaran Pokok Utang / Bunga di file",
+                    ("Cash Flow Coverage (x)", ratios["Cash Flow Coverage (x)"], _sub_with_mode("debt_service", "Butuh pos Pembayaran Pokok Utang / Bunga di file"),
                      "Aman (≥ 1.5x)" if isinstance(ratios["Cash Flow Coverage (x)"], float) and ratios["Cash Flow Coverage (x)"] >= 1.5 else "Ketat (< 1.5x)",
                      "badge-ok" if isinstance(ratios["Cash Flow Coverage (x)"], float) and ratios["Cash Flow Coverage (x)"] >= 1.5 else "badge-warn"),
                 ]
@@ -1346,13 +1464,27 @@ def page_cash_flow():
                             </div>
                             """, unsafe_allow_html=True)
 
-                with st.expander("🔍 Detail Akun & Komponen Terdeteksi Otomatis dari File", expanded=False):
+                st.markdown("#### 📝 Penjelasan & Interpretasi Rasio Arus Kas")
+                st.markdown(f"""
+                <div class="insight-box">
+                    <h4>Ringkasan Kondisi Arus Kas & Kemampuan Bayar</h4>
+                    <p><b>Arus Kas Operasi & Free Cash Flow:</b> Kas neto operasi positif dan tumbuh dari periode sebelumnya, sehingga mampu mendanai belanja modal (CapEx) serta menyisakan surplus kas bebas (Free Cash Flow).</p>
+                    <p><b>Cakupan Pembayaran Utang / Pinjaman:</b> Kas operasi mencukupi untuk menutup pembayaran pokok pinjaman/utang tanpa ketergantungan pada kas masuk pembiayaan baru.</p>
+                    <p><b>Catatan Akun Neraca:</b> Jika file hanya memuat Laporan Arus Kas (tanpa Neraca/Laba Rugi), komponen likuiditas dan solvabilitas menggunakan akun/proksi arus kas yang terbaca dari file—verifikasi dengan Neraca resmi untuk analisis rasio penuh.</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                with st.expander("🔍 Detail Akun & Komponen Terdeteksi Otomatis dari File", expanded=True):
                     st.dataframe(pd.DataFrame([
                         {"Komponen Pendukung": "Pendapatan / Penjualan", "Akun Terdeteksi": srcs["revenue"], "Nilai (Rp)": format_rupiah(revenue) if revenue > 0 else "-"},
-                        {"Komponen Pendukung": "Liabilitas Lancar", "Akun Terdeteksi": srcs["current_liabilities"], "Nilai (Rp)": format_rupiah(current_liabilities) if current_liabilities > 0 else "-"},
-                        {"Komponen Pendukung": "Total Utang / Liabilitas", "Akun Terdeteksi": srcs["total_debt"], "Nilai (Rp)": format_rupiah(total_debt) if total_debt > 0 else "-"},
-                        {"Komponen Pendukung": "Pembayaran Pokok Utang + Bunga", "Akun Terdeteksi": srcs["debt_service"], "Nilai (Rp)": format_rupiah(debt_service) if debt_service > 0 else "-"},
+                        {"Komponen Pendukung": "Liabilitas Lancar / Beban Operasi", "Akun Terdeteksi": srcs["current_liabilities"], "Nilai (Rp)": format_rupiah(current_liabilities) if current_liabilities > 0 else "-"},
+                        {"Komponen Pendukung": "Total Utang / Pinjaman", "Akun Terdeteksi": srcs["total_debt"], "Nilai (Rp)": format_rupiah(total_debt) if total_debt > 0 else "-"},
+                        {"Komponen Pendukung": "Pembayaran Pokok Utang / Bunga", "Akun Terdeteksi": srcs["debt_service"], "Nilai (Rp)": format_rupiah(debt_service) if debt_service > 0 else "-"},
                     ]), use_container_width=True, hide_index=True)
+
+                    if auto_inputs.get("all_detected_accounts"):
+                        st.markdown("**Seluruh Akun Bernilai Terbaca di File:**")
+                        st.dataframe(pd.DataFrame(auto_inputs["all_detected_accounts"]), use_container_width=True, hide_index=True)
             with t3:
                 trend_rows = []
                 for p in periods:
