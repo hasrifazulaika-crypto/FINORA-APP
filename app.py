@@ -878,7 +878,6 @@ def page_cash_flow():
         if not s_clean or s_clean in ("nan", "none", "-", "–", "—"):
             return current_section, "skip"
 
-        # Deteksi header bagian PSAK 207
         is_subtotal_phrase = any(k in s_clean for k in [
             "kas yang dihasilkan dari", "kas neto diperoleh dari", "kas neto yang diperoleh dari",
             "kas neto digunakan untuk", "kas neto yang digunakan untuk",
@@ -892,7 +891,6 @@ def page_cash_flow():
             if ("aktivitas pendanaan" in s_clean or "arus kas pendanaan" in s_clean) and len(s_clean) <= 75:
                 return "pendanaan", "section"
 
-        # Deteksi baris rekonsiliasi saldo kas
         if any(k in s_clean for k in [
             "kenaikan neto kas", "penurunan neto kas", "kenaikan (penurunan) neto kas",
             "kenaikan/(penurunan) neto kas", "kenaikan bersih kas", "penurunan bersih kas",
@@ -904,14 +902,12 @@ def page_cash_flow():
         ]):
             return current_section, "recon"
 
-        # Lewati baris subtotal bagian agar tidak double-counting
         if is_subtotal_phrase:
             return current_section, "subtotal"
 
         if current_section in ("operasi", "investasi", "pendanaan"):
             return current_section, current_section
 
-        # Fallback jika laporan tidak memiliki judul bagian eksplisit
         inferred = guess_line_activity(s_clean)
         return current_section, inferred
 
@@ -1029,7 +1025,6 @@ def page_cash_flow():
             key=f"cf_stmt_desc_{file_sig}_{header_row}"
         )
 
-        # Pindai SELURUH baris (bukan hanya 30 baris pertama) + deteksi header tahun/periode
         numeric_candidates = []
         year_candidates = []
         for c in data.columns:
@@ -1089,7 +1084,7 @@ def page_cash_flow():
 
                     if kind in ("operasi", "investasi", "pendanaan"):
                         totals[kind] += value
-                        line_items.append({"Aktivitas": kind.title(), "Uraian": label, "Nilai": value})
+                        line_items.append({"Periode": str(period_col), "Aktivitas": kind.title(), "Uraian": label, "Nilai": value})
                     elif kind == "recon":
                         low = label.lower()
                         if "awal" in low:
@@ -1101,7 +1096,7 @@ def page_cash_flow():
                         elif any(k in low for k in ["kenaikan", "penurunan", "perubahan"]):
                             reported_net_change = value
                     elif kind == "other" and value != 0:
-                        unclassified_items.append({"Uraian": label, "Nilai": value})
+                        unclassified_items.append({"Periode": str(period_col), "Uraian": label, "Nilai": value})
 
                 net_change = sum(totals.values())
                 if net_change == 0 and reported_net_change is not None:
@@ -1145,24 +1140,36 @@ def page_cash_flow():
             st.markdown("---")
             st.markdown("### 2. Cash Flow Overview")
             periods = list(saved["results"].keys())
-            chosen = st.selectbox("Periode yang ditampilkan", periods, key="cf_stmt_selected_period")
-            item = saved["results"][chosen]
-            totals = item["totals"]
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Kas Neto Operasi", format_rupiah(totals["operasi"]))
-            k2.metric("Kas Neto Investasi", format_rupiah(totals["investasi"]))
-            k3.metric("Kas Neto Pendanaan", format_rupiah(totals["pendanaan"]))
-            k4.metric("Kenaikan / (Penurunan) Kas", format_rupiah(item["net_change"]))
 
-            statement_view = pd.DataFrame([
-                {"Aktivitas": "Operasi", "Arus Kas Neto": totals["operasi"]},
-                {"Aktivitas": "Investasi", "Arus Kas Neto": totals["investasi"]},
-                {"Aktivitas": "Pendanaan", "Arus Kas Neto": totals["pendanaan"]},
-                {"Aktivitas": "Kenaikan / (Penurunan) Neto Kas", "Arus Kas Neto": item["net_change"]},
-                {"Aktivitas": "Saldo Kas Awal", "Arus Kas Neto": item["opening_cash"]},
-                {"Aktivitas": "Saldo Kas Akhir", "Arus Kas Neto": item["closing_cash"]},
-                {"Aktivitas": "Free Cash Flow (estimasi)", "Arus Kas Neto": item["fcf"]},
-            ])
+            total_cfo = sum(saved["results"][p]["totals"]["operasi"] for p in periods)
+            total_cfi = sum(saved["results"][p]["totals"]["investasi"] for p in periods)
+            total_cff = sum(saved["results"][p]["totals"]["pendanaan"] for p in periods)
+            total_net = sum(saved["results"][p]["net_change"] for p in periods)
+
+            label_suffix = f" ({', '.join(str(p) for p in periods)})" if len(periods) > 1 else f" ({periods[0]})"
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric(f"Kas Neto Operasi{label_suffix}", format_rupiah(total_cfo))
+            k2.metric(f"Kas Neto Investasi{label_suffix}", format_rupiah(total_cfi))
+            k3.metric(f"Kas Neto Pendanaan{label_suffix}", format_rupiah(total_cff))
+            k4.metric(f"Kenaikan / (Penurunan) Kas{label_suffix}", format_rupiah(total_net))
+
+            comp_rows = [
+                {"Aktivitas": "Operasi", **{str(p): saved["results"][p]["totals"]["operasi"] for p in periods}, "Total Semua Periode": total_cfo},
+                {"Aktivitas": "Investasi", **{str(p): saved["results"][p]["totals"]["investasi"] for p in periods}, "Total Semua Periode": total_cfi},
+                {"Aktivitas": "Pendanaan", **{str(p): saved["results"][p]["totals"]["pendanaan"] for p in periods}, "Total Semua Periode": total_cff},
+                {"Aktivitas": "Kenaikan / (Penurunan) Neto Kas", **{str(p): saved["results"][p]["net_change"] for p in periods}, "Total Semua Periode": total_net},
+                {"Aktivitas": "Saldo Kas Awal", **{str(p): saved["results"][p]["opening_cash"] for p in periods}, "Total Semua Periode": None},
+                {"Aktivitas": "Saldo Kas Akhir", **{str(p): saved["results"][p]["closing_cash"] for p in periods}, "Total Semua Periode": None},
+                {"Aktivitas": "Free Cash Flow (estimasi)", **{str(p): saved["results"][p]["fcf"] for p in periods}, "Total Semua Periode": sum(saved["results"][p]["fcf"] for p in periods)},
+            ]
+            statement_view = pd.DataFrame(comp_rows)
+
+            all_lines = []
+            all_unclassified = []
+            for p in periods:
+                all_lines.extend(saved["results"][p]["line_items"])
+                all_unclassified.extend(saved["results"][p].get("unclassified_items", []))
+
             ratios = {}
             trend_df = pd.DataFrame()
             t1, t2, t3, t4, t5 = st.tabs([
@@ -1170,29 +1177,30 @@ def page_cash_flow():
             ])
             with t1:
                 st.dataframe(statement_view, use_container_width=True, hide_index=True)
-                if item["line_items"]:
-                    with st.expander(f"📑 Rincian Pos Terklasifikasi ({len(item['line_items'])} baris)", expanded=True):
-                        st.dataframe(pd.DataFrame(item["line_items"]), use_container_width=True, hide_index=True)
-                if item.get("unclassified_items"):
-                    with st.expander(f"⚠️ Pos Belum Terklasifikasi ({len(item['unclassified_items'])} baris)", expanded=False):
-                        st.dataframe(pd.DataFrame(item["unclassified_items"]), use_container_width=True, hide_index=True)
+                if all_lines:
+                    with st.expander(f"📑 Rincian Pos Terklasifikasi Semua Periode ({len(all_lines)} baris)", expanded=True):
+                        st.dataframe(pd.DataFrame(all_lines), use_container_width=True, hide_index=True)
+                if all_unclassified:
+                    with st.expander(f"⚠️ Pos Belum Terklasifikasi ({len(all_unclassified)} baris)", expanded=False):
+                        st.dataframe(pd.DataFrame(all_unclassified), use_container_width=True, hide_index=True)
                 st.caption("Pengelompokan otomatis menggunakan uraian akun. Tinjau kembali klasifikasi setiap baris sebelum memakai hasil sebagai laporan resmi.")
             with t2:
                 st.markdown("Rasio yang dapat dihitung dari laporan arus kas dan data pendukung yang tersedia:")
                 revenue_rows = data[data[desc_col].astype(str).str.contains("pendapatan|penjualan|revenue", case=False, na=False)]
-                revenue_default = to_number(revenue_rows.iloc[0][chosen]) if not revenue_rows.empty else 0.0
+                revenue_default = sum(to_number(revenue_rows.iloc[0][p]) for p in periods) if not revenue_rows.empty else 0.0
                 c1, c2 = st.columns(2)
-                revenue = c1.number_input("Pendapatan / Penjualan (Rp)", min_value=0.0, value=float(max(0, revenue_default)), key=f"cf_stmt_revenue_{chosen}")
-                current_liabilities = c2.number_input("Liabilitas Lancar (Rp)", min_value=0.0, value=0.0, key=f"cf_stmt_current_liab_{chosen}")
+                revenue = c1.number_input("Pendapatan / Penjualan (Rp)", min_value=0.0, value=float(max(0, revenue_default)), key="cf_stmt_revenue_all")
+                current_liabilities = c2.number_input("Liabilitas Lancar (Rp)", min_value=0.0, value=0.0, key="cf_stmt_current_liab_all")
                 c3, c4 = st.columns(2)
-                total_debt = c3.number_input("Total Utang (Rp)", min_value=0.0, value=0.0, key=f"cf_stmt_total_debt_{chosen}")
-                debt_service = c4.number_input("Pembayaran Pokok Utang + Bunga (Rp)", min_value=0.0, value=0.0, key=f"cf_stmt_debt_service_{chosen}")
+                total_debt = c3.number_input("Total Utang (Rp)", min_value=0.0, value=0.0, key="cf_stmt_total_debt_all")
+                debt_service = c4.number_input("Pembayaran Pokok Utang + Bunga (Rp)", min_value=0.0, value=0.0, key="cf_stmt_debt_service_all")
+                total_fcf = sum(saved["results"][p]["fcf"] for p in periods)
                 ratios = {
-                    "Cash Flow Margin (%)": round(totals["operasi"] / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia",
-                    "Operating Cash Flow Ratio (x)": round(totals["operasi"] / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia",
-                    "Cash Flow to Debt Ratio (%)": round(totals["operasi"] / total_debt * 100, 2) if total_debt > 0 else "Data total utang tidak tersedia",
-                    "Cash Flow Coverage (x)": round(totals["operasi"] / debt_service, 2) if debt_service > 0 else "Data pembayaran utang dan bunga tidak tersedia",
-                    "Free Cash Flow (Rp)": item["fcf"],
+                    "Cash Flow Margin (%)": round(total_cfo / revenue * 100, 2) if revenue > 0 else "Data pendapatan tidak tersedia",
+                    "Operating Cash Flow Ratio (x)": round(total_cfo / current_liabilities, 2) if current_liabilities > 0 else "Data liabilitas lancar tidak tersedia",
+                    "Cash Flow to Debt Ratio (%)": round(total_cfo / total_debt * 100, 2) if total_debt > 0 else "Data total utang tidak tersedia",
+                    "Cash Flow Coverage (x)": round(total_cfo / debt_service, 2) if debt_service > 0 else "Data pembayaran utang dan bunga tidak tersedia",
+                    "Free Cash Flow (Rp)": total_fcf,
                 }
                 for label, val in ratios.items():
                     if isinstance(val, (int, float)):
@@ -1202,14 +1210,15 @@ def page_cash_flow():
                 st.caption("Masukkan data pendukung dari laporan laba rugi dan laporan posisi keuangan. Rasio hanya dihitung jika pembaginya tersedia dan lebih besar dari nol.")
             with t3:
                 trend_rows = []
-                for period_name, result in saved["results"].items():
+                for p in periods:
+                    res_p = saved["results"][p]
                     trend_rows.append({
-                        "Periode": str(period_name),
-                        "Operasi": result["totals"]["operasi"],
-                        "Investasi": result["totals"]["investasi"],
-                        "Pendanaan": result["totals"]["pendanaan"],
-                        "Perubahan Kas": result["net_change"],
-                        "Saldo Kas Akhir": result["closing_cash"]
+                        "Periode": str(p),
+                        "Operasi": res_p["totals"]["operasi"],
+                        "Investasi": res_p["totals"]["investasi"],
+                        "Pendanaan": res_p["totals"]["pendanaan"],
+                        "Perubahan Kas": res_p["net_change"],
+                        "Saldo Kas Akhir": res_p["closing_cash"]
                     })
                 trend_df = pd.DataFrame(trend_rows)
                 st.plotly_chart(
@@ -1221,16 +1230,19 @@ def page_cash_flow():
                 st.dataframe(trend_df, use_container_width=True, hide_index=True)
             with t4:
                 issues = []
-                if totals["operasi"] < 0:
-                    issues.append("Arus kas operasi negatif.")
-                if item["closing_cash"] is not None and item["closing_cash"] < 0:
-                    issues.append("Saldo kas akhir negatif.")
-                if item["calculated_closing"] is not None and item["closing_cash"] is not None:
-                    difference = item["closing_cash"] - item["calculated_closing"]
-                    if abs(difference) > 1:
-                        issues.append(f"Rekonsiliasi saldo kas berbeda sebesar {format_rupiah(difference)}.")
-                if totals["pendanaan"] > 0 and totals["operasi"] < 0:
-                    issues.append("Kas positif berpotensi bergantung pada pendanaan eksternal ketika operasi belum menghasilkan kas.")
+                for p in periods:
+                    res_p = saved["results"][p]
+                    t_p = res_p["totals"]
+                    if t_p["operasi"] < 0:
+                        issues.append(f"[{p}] Arus kas operasi negatif.")
+                    if res_p["closing_cash"] is not None and res_p["closing_cash"] < 0:
+                        issues.append(f"[{p}] Saldo kas akhir negatif.")
+                    if res_p["calculated_closing"] is not None and res_p["closing_cash"] is not None:
+                        difference = res_p["closing_cash"] - res_p["calculated_closing"]
+                        if abs(difference) > 1:
+                            issues.append(f"[{p}] Rekonsiliasi saldo kas berbeda sebesar {format_rupiah(difference)}.")
+                    if t_p["pendanaan"] > 0 and t_p["operasi"] < 0:
+                        issues.append(f"[{p}] Kas positif berpotensi bergantung pada pendanaan eksternal ketika operasi belum menghasilkan kas.")
                 if issues:
                     for issue in issues:
                         st.warning(issue)
@@ -1238,33 +1250,37 @@ def page_cash_flow():
                     st.success("Tidak ditemukan indikator risiko dasar dari pos ringkasan yang tersedia. Ini bukan jaminan tidak ada salah saji.")
             with t5:
                 if st.button("🤖 Buat AI Financial Insights", key="ai_cf_statement"):
-                    context = (
-                        f"Periode: {chosen}\nArus kas operasi: {totals['operasi']:,.0f}\n"
-                        f"Arus kas investasi: {totals['investasi']:,.0f}\n"
-                        f"Arus kas pendanaan: {totals['pendanaan']:,.0f}\n"
-                        f"Perubahan neto kas: {item['net_change']:,.0f}\n"
-                        f"Saldo awal: {item['opening_cash']}\nSaldo akhir: {item['closing_cash']}\n"
-                        f"Free cash flow estimasi: {item['fcf']:,.0f}"
-                    )
+                    context_lines = [f"Periode Dianalisis: {', '.join(str(p) for p in periods)}"]
+                    for p in periods:
+                        res_p = saved["results"][p]
+                        context_lines.append(
+                            f"- Periode {p}: Operasi={res_p['totals']['operasi']:,.0f}, "
+                            f"Investasi={res_p['totals']['investasi']:,.0f}, "
+                            f"Pendanaan={res_p['totals']['pendanaan']:,.0f}, "
+                            f"Perubahan Neto={res_p['net_change']:,.0f}, "
+                            f"Saldo Awal={res_p['opening_cash']}, Saldo Akhir={res_p['closing_cash']}, "
+                            f"FCF={res_p['fcf']:,.0f}"
+                        )
+                    context = "\n".join(context_lines)
                     prompt = (
-                        "Analisis arus kas secara profesional. Jelaskan sumber dan penggunaan kas, "
-                        "kualitas arus kas operasi, aktivitas investasi dan pendanaan, risiko likuiditas, "
-                        "rekonsiliasi saldo, serta rekomendasi yang spesifik. Bedakan fakta angka dan interpretasi. "
+                        "Analisis arus kas secara profesional untuk seluruh periode yang ditampilkan. "
+                        "Jelaskan sumber dan penggunaan kas, kualitas arus kas operasi, aktivitas investasi "
+                        "dan pendanaan, perbandingan antarperiode, risiko likuiditas, rekonsiliasi saldo, "
+                        "serta rekomendasi yang spesifik. Bedakan fakta angka dan interpretasi. "
                         "Jangan menyimpulkan rasio yang datanya tidak tersedia."
                     )
                     with st.chat_message("assistant"):
                         st.write_stream(ask_gemini_stream(prompt, context, system_role="Analis Arus Kas dan Akuntansi Profesional"))
+
             summary = {
-                "Periode": chosen,
-                "Kas Neto Operasi": totals["operasi"],
-                "Kas Neto Investasi": totals["investasi"],
-                "Kas Neto Pendanaan": totals["pendanaan"],
-                "Perubahan Neto Kas": item["net_change"],
-                "Saldo Kas Awal": item["opening_cash"],
-                "Saldo Kas Akhir": item["closing_cash"],
-                "Free Cash Flow": item["fcf"]
+                "Periode": ", ".join(str(p) for p in periods),
+                "Kas Neto Operasi": total_cfo,
+                "Kas Neto Investasi": total_cfi,
+                "Kas Neto Pendanaan": total_cff,
+                "Perubahan Neto Kas": total_net,
+                "Free Cash Flow": sum(saved["results"][p]["fcf"] for p in periods)
             }
-            excel_data = make_cf_excel(statement_view, {}, summary, trend_df if len(saved["results"]) > 1 else None)
+            excel_data = make_cf_excel(statement_view, {}, summary, trend_df if len(periods) > 1 else None)
             st.download_button(
                 "⬇️ Download Analisis Cash Flow (Excel)",
                 data=excel_data,
