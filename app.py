@@ -53,11 +53,30 @@ h1, h2, h3 { color: var(--finora-burgundy); }
 </style>
 """, unsafe_allow_html=True)
 
+# Mapping konsisten: nama modul audit → key flagged_data
+MODULE_TO_KEY = {
+    "Kelengkapan Data": "Kelengkapan Kosong",
+    "Data Duplikat": "Duplikasi Ekstrem",
+    "Observasi Nilai Negatif": "Nilai Negatif",
+    "Overbudget (Melebihi Pagu)": "Overbudget",
+    "Transaksi Weekend": "Transaksi Weekend",
+    "Kata Kunci Mencurigakan": "Kata Kunci",
+    "Anomali Nominal (Outlier)": "Outlier IQR",
+}
+
 def format_rupiah(val):
-    if abs(val) >= 1_000_000_000_000: return f"Rp {val/1_000_000_000_000:,.2f} T"
-    elif abs(val) >= 1_000_000_000: return f"Rp {val/1_000_000_000:,.2f} M"
-    elif abs(val) >= 1_000_000: return f"Rp {val/1_000_000:,.2f} Jt"
-    else: return f"Rp {val:,.0f}"
+    """Format rupiah dengan tanda kurung untuk nilai negatif (standar akuntansi)."""
+    try:
+        val = float(val)
+    except Exception:
+        val = 0.0
+    neg = val < 0
+    v = abs(val)
+    if v >= 1_000_000_000_000: s = f"Rp {v/1_000_000_000_000:,.2f} T"
+    elif v >= 1_000_000_000:   s = f"Rp {v/1_000_000_000:,.2f} M"
+    elif v >= 1_000_000:       s = f"Rp {v/1_000_000:,.2f} Jt"
+    else:                      s = f"Rp {v:,.0f}"
+    return f"({s})" if neg else s
 
 def clean_currency(x):
     if pd.isna(x): return 0.0
@@ -84,6 +103,42 @@ def clean_currency(x):
 
 def metric_card(label, value, help_text=""):
     st.markdown(f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""", unsafe_allow_html=True)
+
+def _clean_headers(raw_headers):
+    """Bersihkan header: isi kosong → Unnamed_X, duplicate → nama_2, nama_3, dst."""
+    cleaned = []
+    for j, h in enumerate(raw_headers):
+        h_str = str(h).strip()
+        if h_str.lower() in ('nan', 'none', ''):
+            h_str = f"Unnamed_{j}"
+        orig, counter = h_str, 2
+        while h_str in cleaned:
+            h_str = f"{orig}_{counter}"
+            counter += 1
+        cleaned.append(h_str)
+    return cleaned
+
+def safe_read_dataframe(uploaded, header_row=0):
+    """Baca Excel/CSV dengan aman dari duplicate column names.
+    Fallback ke manual header cleaning jika pandas menolak."""
+    def _raw_read():
+        return (pd.read_excel(uploaded, header=None)
+                if uploaded.name.endswith('xlsx')
+                else pd.read_csv(uploaded, header=None))
+    try:
+        return (pd.read_excel(uploaded, header=header_row)
+                if uploaded.name.endswith('xlsx')
+                else pd.read_csv(uploaded, header=header_row))
+    except ValueError as e:
+        if "Duplicate column names" not in str(e):
+            raise
+        df_raw = _raw_read()
+        if header_row >= len(df_raw):
+            raise
+        cleaned = _clean_headers(df_raw.iloc[header_row].tolist())
+        df = df_raw.iloc[header_row + 1:].copy()
+        df.columns = cleaned
+        return df.reset_index(drop=True)
 
 # ============================================================
 # DATABASE
@@ -150,7 +205,11 @@ def fetch_findings(aid):
 # AI ENGINE
 # ============================================================
 def get_gemini_client():
-    api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+    api_key = ""
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+    except Exception:
+        api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key: return None
     return genai.Client(api_key=api_key)
 
@@ -160,17 +219,8 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
         if client is None:
             yield "⚠️ API Key Gemini belum diatur di Secrets."
             return
-        model_id = "gemini-3.8-flash"
+        model_id = "gemini-2.0-flash"
         full_prompt = f"Kamu adalah FINORA AI, {system_role}.\nJawab pertanyaan berdasarkan konteks data yang diberikan secara ringkas, padat, dan profesional.\n\n[KONTEKS DATA]\n{audit_context}\n\n[PERTANYAAN / INSTRUKSI]\n{prompt}"
-        if hasattr(client, "interactions"):
-            try:
-                stream = client.interactions.create(model=model_id, input=full_prompt, stream=True)
-                for event in stream:
-                    delta = getattr(event, "delta", None)
-                    if delta and getattr(delta, "text", None): yield delta.text
-                    elif getattr(event, "text", None): yield event.text
-                return
-            except Exception: pass 
         response_stream = client.models.generate_content_stream(model=model_id, contents=full_prompt)
         for chunk in response_stream:
             if getattr(chunk, "text", None): yield chunk.text
@@ -421,13 +471,10 @@ def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data)
         elements.append(Paragraph(f"<b>F-{idx:02d}: {f['title']}</b>", normal_style))
         elements.append(Paragraph(f"<b>1. Kondisi:</b> {f['detail']}", normal_style))
         elements.append(Paragraph(f"<b>2. Rekomendasi:</b> {f['recommendation']}", normal_style))
-        modul_name = f['module']
         df_flag = pd.DataFrame()
-        if modul_name in flagged_data and not flagged_data[modul_name].empty: df_flag = flagged_data[modul_name]
-        elif "Kelengkapan" in modul_name and "Kelengkapan Kosong" in flagged_data: df_flag = flagged_data["Kelengkapan Kosong"]
-        elif "Duplikat" in modul_name and "Duplikasi Ekstrem" in flagged_data: df_flag = flagged_data["Duplikasi Ekstrem"]
-        elif "Negatif" in modul_name and "Nilai Negatif" in flagged_data: df_flag = flagged_data["Nilai Negatif"]
-        elif "Overbudget" in modul_name and "Overbudget" in flagged_data: df_flag = flagged_data["Overbudget"]
+        key = MODULE_TO_KEY.get(f['module'])
+        if key and key in flagged_data and not flagged_data[key].empty:
+            df_flag = flagged_data[key]
         if not df_flag.empty:
             elements.append(Spacer(1, 5))
             elements.append(Paragraph("<i>Bukti Audit:</i>", normal_style))
@@ -522,12 +569,9 @@ def render_audit_results(all_findings, flagged_data, filename, entitas, periode,
                     st.markdown("**3. Sebab**\nKelemahan kontrol internal / human error.")
                     st.markdown("**4. Akibat**\nBerpotensi kerugian finansial / laporan tidak wajar.")
                 st.error(f"**5. Rekomendasi:** {f['recommendation']}")
-                modul_name = f['module']
-                if modul_name in flagged_data and not flagged_data[modul_name].empty: st.dataframe(flagged_data[modul_name].head(10), use_container_width=True)
-                elif "Kelengkapan" in modul_name and "Kelengkapan Kosong" in flagged_data: st.dataframe(flagged_data["Kelengkapan Kosong"].head(10), use_container_width=True)
-                elif "Duplikat" in modul_name and "Duplikasi Ekstrem" in flagged_data: st.dataframe(flagged_data["Duplikasi Ekstrem"].head(10), use_container_width=True)
-                elif "Negatif" in modul_name and "Nilai Negatif" in flagged_data: st.dataframe(flagged_data["Nilai Negatif"].head(10), use_container_width=True)
-                elif "Overbudget" in modul_name and "Overbudget" in flagged_data: st.dataframe(flagged_data["Overbudget"].head(10), use_container_width=True)
+                key = MODULE_TO_KEY.get(f['module'])
+                if key and key in flagged_data and not flagged_data[key].empty:
+                    st.dataframe(flagged_data[key].head(10), use_container_width=True)
         st.markdown("---")
         st.warning(f"Ditemukan **{len(all_findings)} indikasi masalah**. Data memerlukan verifikasi lebih lanjut.")
         st.markdown("### 📥 Download Kertas Kerja Audit")
@@ -566,7 +610,11 @@ def page_audit():
         uploaded = c1.file_uploader("Upload File Excel/CSV", type=["xlsx", "csv"], key="audit_upload")
         header_row = c2.number_input("Header di baris ke-", min_value=0, value=0, key="audit_header")
     if uploaded:
-        df = pd.read_excel(uploaded, header=header_row) if uploaded.name.endswith('xlsx') else pd.read_csv(uploaded, header=header_row)
+        try:
+            df = safe_read_dataframe(uploaded, header_row=header_row)
+        except Exception as e:
+            st.error(f"❌ Gagal membaca file: {str(e)}")
+            st.stop()
         detected = auto_detect_columns(df)
         st.markdown("### 2. Pemetaan Kolom")
         st.success("✨ FINORA AI telah mendeteksi otomatis kolom.")
@@ -619,7 +667,11 @@ def page_financial_analysis():
     uploaded_fin = c1.file_uploader("Upload File Excel/CSV (APBD / Neraca / Laba Rugi)", type=["xlsx", "csv"], key="fin_upload")
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"])
     if uploaded_fin:
-        df_fin = pd.read_excel(uploaded_fin) if uploaded_fin.name.endswith('xlsx') else pd.read_csv(uploaded_fin)
+        try:
+            df_fin = safe_read_dataframe(uploaded_fin, header_row=0)
+        except Exception as e:
+            st.error(f"❌ Gagal membaca file: {str(e)}")
+            st.stop()
         st.success("✨ File berhasil dibaca.")
         if st.button("📊 ANALISIS KEUANGAN OTOMATIS", use_container_width=True):
             with st.spinner("Menghitung rasio..."):
@@ -702,119 +754,135 @@ def page_cash_flow():
     c1, c2 = st.columns([3, 1])
     uploaded_cf = c1.file_uploader("Upload File Excel/CSV (Mutasi Bank ATAU Laporan Arus Kas)", type=["xlsx", "csv"], key="cf_upload")
     header_row_cf = c2.number_input("Header di baris ke-", min_value=0, value=0, key="cf_header", help="Ubah ke 1 atau 2 jika baris pertama Excel adalah Judul.")
-    
+
+    def _detect_header_row(df, keywords, max_scan=30):
+        for i in range(min(max_scan, len(df))):
+            row_vals = [str(c).lower() for c in df.iloc[i].values if pd.notna(c)]
+            if any(kw in cell for cell in row_vals for kw in keywords):
+                return i
+        return None
+
     if uploaded_cf:
         try:
-            # --- SMART DETECTION & FIX DUPLICATE COLUMNS ---
-            # Kita baca file tanpa header dulu agar Pandas tidak error saat ada nama kolom ganda
-            df_raw = pd.read_excel(uploaded_cf, header=None) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=None)
-            
-            is_statement = False
-            header_idx = header_row_cf
-            for i, row in df_raw.head(20).iterrows():
-                row_str = [str(cell).lower() for cell in row.values if pd.notna(cell)]
-                if any("uraian" in cell or "keterangan" in cell for cell in row_str):
-                    is_statement = True
-                    header_idx = i
-                    break
-                    
+            # === SELALU baca dengan header=None dulu (aman dari duplicate columns) ===
+            df_raw = (pd.read_excel(uploaded_cf, header=None)
+                      if uploaded_cf.name.endswith('xlsx')
+                      else pd.read_csv(uploaded_cf, header=None))
+
+            # === 1. DETEKSI LAPORAN ARUS KAS (STATEMENT) ===
+            statement_header_idx = _detect_header_row(
+                df_raw, ["uraian", "keterangan", "deskripsi", "pos ", "akun"]
+            )
+            is_statement = statement_header_idx is not None
+
             if is_statement:
                 st.info("📄 **Terdeteksi: Laporan Arus Kas Komparatif.** Aplikasi akan menampilkan ringkasan laporan.")
-                
-                # Ambil baris header dan bersihkan jika ada duplikat
-                headers = df_raw.iloc[header_idx].tolist()
-                clean_headers = []
-                for j, h in enumerate(headers):
-                    h_str = str(h).strip()
-                    if h_str == 'nan' or h_str == '':
-                        h_str = f"Unnamed_{j}"
-                    # Cek jika sudah ada nama yang sama, tambahkan _2, _3, dst.
-                    if h_str in clean_headers:
-                        h_str = f"{h_str}_{j}"
-                    clean_headers.append(h_str)
-                
-                # Buat dataframe baru mulai dari baris setelah header
-                df_cf = df_raw.iloc[header_idx+1:].copy()
+                st.session_state.pop('cf_results', None)  # bersihkan hasil lama
+
+                clean_headers = _clean_headers(df_raw.iloc[statement_header_idx].tolist())
+                df_cf = df_raw.iloc[statement_header_idx + 1:].copy()
                 df_cf.columns = clean_headers
                 df_cf = df_cf.reset_index(drop=True)
-                
-                # Cari kolom Uraian
-                col_uraian = next((c for c in df_cf.columns if "uraian" in str(c).lower() or "keterangan" in str(c).lower()), None)
+
+                col_uraian = next(
+                    (c for c in df_cf.columns if any(
+                        k in str(c).lower() for k in ["uraian", "keterangan", "deskripsi", "pos"])
+                     ), None)
                 if col_uraian is None:
                     col_uraian = df_cf.columns[1] if len(df_cf.columns) > 1 else df_cf.columns[0]
-                    
-                # Cari kolom Tahun
+
                 col_2024 = next((c for c in df_cf.columns if "2024" in str(c) or "tahun 1" in str(c).lower()), None)
                 col_2023 = next((c for c in df_cf.columns if "2023" in str(c) or "tahun 2" in str(c).lower()), None)
-                
-                if not col_2024 and len(df_cf.columns) >= 3: col_2024 = df_cf.columns[2]
-                if not col_2023 and len(df_cf.columns) >= 4: col_2023 = df_cf.columns[3]
-                
+                if not col_2024 and len(df_cf.columns) >= 3:
+                    col_2024 = df_cf.columns[2]
+                if not col_2023 and len(df_cf.columns) >= 4:
+                    col_2023 = df_cf.columns[3]
+
                 if col_2024: df_cf[col_2024] = df_cf[col_2024].apply(clean_currency)
                 if col_2023: df_cf[col_2023] = df_cf[col_2023].apply(clean_currency)
-                
+
                 df_cf = df_cf.dropna(subset=[col_uraian])
                 df_cf = df_cf[df_cf[col_uraian].astype(str).str.strip() != ""]
-                
+
                 st.write("### Ringkasan Laporan")
                 preview_cols = [col_uraian]
                 if col_2024: preview_cols.append(col_2024)
                 if col_2023: preview_cols.append(col_2023)
                 st.dataframe(df_cf[preview_cols].reset_index(drop=True), use_container_width=True)
-                
-                main_rows = df_cf[df_cf[col_uraian].astype(str).str.contains("Arus Kas Bersih|Kenaikan|Penurunan|Saldo Kas", case=False, na=False)]
-                
+
+                main_rows = df_cf[df_cf[col_uraian].astype(str).str.contains(
+                    "Arus Kas Bersih|Kenaikan|Penurunan|Saldo Kas", case=False, na=False)]
+
                 if not main_rows.empty:
                     fig = go.Figure()
                     if col_2024: fig.add_trace(go.Bar(name='Tahun 2024', x=main_rows[col_uraian], y=main_rows[col_2024], marker_color='#FF5C8B'))
                     if col_2023: fig.add_trace(go.Bar(name='Tahun 2023', x=main_rows[col_uraian], y=main_rows[col_2023], marker_color='#7A1F3D'))
                     fig.update_layout(barmode='group', title="Perbandingan Arus Kas Utama", height=500)
                     st.plotly_chart(fig, use_container_width=True)
-                    
+
                 st.markdown("### 🤖 AI Cash Flow Advisor")
                 if st.button("Analisis Laporan Arus Kas dengan AI", use_container_width=True):
                     context = "Data Laporan Arus Kas:\n"
                     for _, row in main_rows.iterrows():
-                        val_24 = row[col_2024] if col_2024 else 0
-                        val_23 = row[col_2023] if col_2023 else 0
-                        context += f"- {row[col_uraian]}: 2024 = Rp {val_24:,.0f}, 2023 = Rp {val_23:,.0f}\n"
-                    prompt = "Berikan analisis profesional mengenai kesehatan arus kas perusahaan berdasarkan data komparatif ini. Soroti tren operasi, investasi, pendanaan, dan berikan rekomendasi strategis."
-                    with st.chat_message("assistant"): st.write_stream(ask_gemini_stream(prompt, context, system_role="Analis Arus Kas Ahli"))
-                return # Hentikan eksekusi, jangan lanjut ke logika transaksi harian
-                
-            # --- LOGIKA MUTASI BANK (TRANSAKSI HARIAN) ---
-            df_cf = pd.read_excel(uploaded_cf, header=header_row_cf) if uploaded_cf.name.endswith('xlsx') else pd.read_csv(uploaded_cf, header=header_row_cf)
-            
+                        v24 = row[col_2024] if col_2024 else 0
+                        v23 = row[col_2023] if col_2023 else 0
+                        context += f"- {row[col_uraian]}: 2024 = Rp {v24:,.0f}, 2023 = Rp {v23:,.0f}\n"
+                    prompt = ("Berikan analisis profesional mengenai kesehatan arus kas perusahaan "
+                              "berdasarkan data komparatif ini. Soroti tren operasi, investasi, "
+                              "pendanaan, dan berikan rekomendasi strategis.")
+                    with st.chat_message("assistant"):
+                        st.write_stream(ask_gemini_stream(prompt, context, system_role="Analis Arus Kas Ahli"))
+                return  # stop di sini untuk mode statement
+
+            # === 2. MODE MUTASI BANK (TRANSAKSI HARIAN) ===
+            bank_header_idx = _detect_header_row(
+                df_raw, ["tanggal", "tgl", "date", "waktu", "periode"]
+            )
+            if bank_header_idx is None:
+                bank_header_idx = header_row_cf
+
+            clean_headers = _clean_headers(df_raw.iloc[bank_header_idx].tolist())
+            df_cf = df_raw.iloc[bank_header_idx + 1:].copy()
+            df_cf.columns = clean_headers
+            df_cf = df_cf.reset_index(drop=True)
+
             auto_tgl, auto_ket, auto_nom = "", "", ""
             for c in df_cf.columns:
                 c_low = str(c).lower()
                 if not auto_tgl and any(k in c_low for k in ["tanggal", "tgl", "date", "waktu", "periode"]): auto_tgl = c
                 if not auto_ket and any(k in c_low for k in ["keterangan", "deskripsi", "uraian", "nama", "category", "kategori", "transaksi", "ket"]): auto_ket = c
                 if not auto_nom and any(k in c_low for k in ["nominal", "jumlah", "nilai", "amount", "debit", "kredit", "mutasi", "total"]): auto_nom = c
-                
+
             for c in df_cf.columns:
                 sample = df_cf[c].dropna().head(20).astype(str)
                 if sample.empty: continue
-                if not auto_tgl and pd.to_datetime(sample, errors='coerce', dayfirst=True).notna().sum() > len(sample) * 0.5: auto_tgl = c
+                if not auto_tgl and pd.to_datetime(sample, errors='coerce', dayfirst=True).notna().sum() > len(sample) * 0.5:
+                    auto_tgl = c
                 elif not auto_nom and c != auto_tgl:
                     parsed_nums = sample.apply(clean_currency)
-                    if (parsed_nums != 0).sum() > len(sample) * 0.5: auto_nom = c
-                    
+                    if (parsed_nums != 0).sum() > len(sample) * 0.5:
+                        auto_nom = c
+
             if not auto_tgl and len(df_cf.columns) > 0: auto_tgl = df_cf.columns[0]
             if not auto_nom and len(df_cf.columns) > 1: auto_nom = df_cf.columns[1]
             if not auto_ket:
                 for c in df_cf.columns:
-                    if c not in [auto_tgl, auto_nom]: auto_ket = c; break
-            
+                    if c not in [auto_tgl, auto_nom]:
+                        auto_ket = c
+                        break
+
             st.markdown("### 2. Pemetaan Kolom (Otomatis)")
             st.success("✨ FINORA AI telah mendeteksi kolom secara otomatis. Kamu bisa langsung menjalankan analisis.")
-            
+
             with st.expander("⚙️ Lihat / Koreksi Pemetaan Kolom", expanded=False):
                 c3, c4, c5 = st.columns(3)
-                col_tgl = c3.selectbox("Kolom Tanggal", list(df_cf.columns), index=list(df_cf.columns).index(auto_tgl) if auto_tgl in list(df_cf.columns) else 0)
-                col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns), index=list(df_cf.columns).index(auto_ket)+1 if auto_ket in list(df_cf.columns) else 0)
-                col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns), index=list(df_cf.columns).index(auto_nom) if auto_nom in list(df_cf.columns) else 0)
-                
+                col_tgl = c3.selectbox("Kolom Tanggal", list(df_cf.columns),
+                                       index=list(df_cf.columns).index(auto_tgl) if auto_tgl in list(df_cf.columns) else 0)
+                col_ket = c4.selectbox("Kolom Keterangan", [""] + list(df_cf.columns),
+                                       index=list(df_cf.columns).index(auto_ket) + 1 if auto_ket in list(df_cf.columns) else 0)
+                col_nom = c5.selectbox("Kolom Nominal", list(df_cf.columns),
+                                       index=list(df_cf.columns).index(auto_nom) if auto_nom in list(df_cf.columns) else 0)
+
             st.markdown("---")
             if st.button("📊 JALANKAN ANALISIS ARUS KAS", use_container_width=True):
                 with st.spinner("Memproses data..."):
@@ -837,15 +905,15 @@ def page_cash_flow():
                         total_keluar = df_cf[df_cf[col_nom] < 0][col_nom].sum()
                         df_cf['Running Balance'] = df_cf[col_nom].cumsum()
                         saldo_akhir = df_cf['Running Balance'].iloc[-1] if not df_cf.empty else 0
-                        
+
                         bulan_unik = max(1, df_cf['_parsed_date'].dt.to_period('M').nunique())
                         burn_rate = abs(total_keluar) / bulan_unik
                         bulan_bertahan = (saldo_akhir / burn_rate) if burn_rate > 0 and saldo_akhir > 0 else 999
-                        
+
                         st.session_state['cf_results'] = {
-                            "df": df_cf, "col_tgl": '_parsed_date', "col_nom": col_nom, 
-                            "total_masuk": total_masuk, "total_keluar": total_keluar, 
-                            "saldo_akhir": saldo_akhir, "burn_rate": burn_rate, 
+                            "df": df_cf, "col_tgl": '_parsed_date', "col_nom": col_nom,
+                            "total_masuk": total_masuk, "total_keluar": total_keluar,
+                            "saldo_akhir": saldo_akhir, "burn_rate": burn_rate,
                             "bulan_bertahan": bulan_bertahan
                         }
                         st.success("✅ Analisis berhasil dijalankan!")
