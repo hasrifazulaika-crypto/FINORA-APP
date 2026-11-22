@@ -2983,7 +2983,7 @@ def main():
                 f'<div class="finora-sidebar-brand">'
                 f'<img src="data:image/png;base64,{LOGO_B64}" alt="FINORA Logo">'
                 f'<div class="finora-sidebar-title">FINORA AI</div>'
-                f'<div class="finora-sidebar-sub">Financial Intelligence Platform</div>'
+                f'<div class="finora-sidebar-sub">Financial Analysis & Audit Platform</div>'
                 f'</div>',
                 unsafe_allow_html=True
             )
