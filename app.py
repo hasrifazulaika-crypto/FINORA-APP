@@ -32,7 +32,7 @@ def get_base64_image(image_path):
 
 LOGO_B64 = get_base64_image(LOGO_FILENAME)
 
-st.set_page_config(page_title="FINORA AI - Pro Audit", page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F", layout="wide")
+st.set_page_config(page_title="FINORA - Financial APP", page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F", layout="wide")
 
 st.markdown("""
 <style>
