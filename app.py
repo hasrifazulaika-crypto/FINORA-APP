@@ -2702,17 +2702,7 @@ def _go_to_nav(target_nav):
     st.session_state.nav_radio = target_nav
 
 def page_dashboard():
-    finora_header("Dashboard", "Ringkasan aktivitas & pusat akses cepat seluruh fitur FINORA AI")
-    conn = get_conn()
-    t_files = pd.read_sql_query("SELECT COUNT(*) c FROM files", conn).iloc[0]['c']
-    t_analyses = pd.read_sql_query("SELECT COUNT(*) c FROM analyses", conn).iloc[0]['c']
-    t_findings = pd.read_sql_query("SELECT COUNT(*) c FROM findings", conn).iloc[0]['c']
-    h_risk = pd.read_sql_query("SELECT COUNT(*) c FROM findings WHERE risk_level='Tinggi'", conn).iloc[0]['c']
-    conn.close()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📁 File Dianalisis", t_files); c2.metric("📊 Analisis Dilakukan", t_analyses); c3.metric("⚠️ Total Temuan", t_findings); c4.metric("🔴 Risiko Tinggi", h_risk)
-
-    st.markdown("---")
+    finora_header("Dashboard", "Pusat akses cepat seluruh fitur analisis & pembelajaran FINORA AI")
     st.subheader("🚀 Pilih Fitur Analisis & Pembelajaran")
     st.caption("Klik tombol pada kartu fitur di bawah ini untuk langsung masuk ke modul yang diinginkan:")
 
@@ -2835,11 +2825,91 @@ def main():
         if "nav_radio" not in st.session_state or st.session_state.nav_radio not in nav_items:
             st.session_state.nav_radio = st.session_state.selected_nav
 
-        try:
-            st.sidebar.image(LOGO_FILENAME, width=180)
-        except:
-            st.sidebar.markdown('<h1 style="color:#FF5C8B;text-align:center;">F</h1>', unsafe_allow_html=True)
-        st.sidebar.markdown('<p style="text-align:center;font-size:12px;color:#7A1F3D;">Financial Intelligence<br>Platform</p>', unsafe_allow_html=True)
+        st.sidebar.markdown("""
+        <style>
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #FFF5F8 0%, #FFF9F2 100%);
+            border-right: 1px solid #F8C8D4;
+        }
+        .finora-sidebar-brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 14px 10px 10px 10px;
+            margin: 4px auto 8px auto;
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid #F8C8D4;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(122, 31, 61, 0.06);
+        }
+        .finora-sidebar-brand img {
+            width: 84px;
+            height: 84px;
+            object-fit: contain;
+            border-radius: 50%;
+            margin: 0 auto 8px auto;
+            display: block;
+            box-shadow: 0 3px 10px rgba(255, 92, 139, 0.22);
+        }
+        .finora-sidebar-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: #7A1F3D;
+            letter-spacing: 0.4px;
+            margin: 0;
+        }
+        .finora-sidebar-sub {
+            font-size: 11px;
+            font-weight: 600;
+            color: #8F4A62;
+            line-height: 1.35;
+            margin-top: 2px;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] > label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #7A1F3D;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] {
+            gap: 6px;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label {
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid #F4D2DC;
+            border-radius: 10px;
+            padding: 8px 12px;
+            margin: 0;
+            transition: all 0.2s ease;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label:hover {
+            background: #FFE8EF;
+            border-color: #FF5C8B;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        if LOGO_B64:
+            st.sidebar.markdown(
+                f'<div class="finora-sidebar-brand">'
+                f'<img src="data:image/png;base64,{LOGO_B64}" alt="FINORA Logo">'
+                f'<div class="finora-sidebar-title">FINORA AI</div>'
+                f'<div class="finora-sidebar-sub">Financial Intelligence Platform</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.sidebar.markdown(
+                '<div class="finora-sidebar-brand">'
+                '<div style="width:64px;height:64px;line-height:64px;border-radius:50%;background:linear-gradient(135deg,#FF5C8B,#7A1F3D);color:white;font-size:28px;font-weight:800;margin:0 auto 8px auto;">F</div>'
+                '<div class="finora-sidebar-title">FINORA AI</div>'
+                '<div class="finora-sidebar-sub">Financial Intelligence Platform</div>'
+                '</div>',
+                unsafe_allow_html=True
+            )
         st.sidebar.markdown("---")
         nav = st.sidebar.radio(
             "Navigasi",
