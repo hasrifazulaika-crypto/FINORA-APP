@@ -2704,35 +2704,62 @@ def _go_to_nav(target_nav):
 def page_dashboard():
     finora_header("Dashboard", "Pusat akses cepat seluruh fitur analisis & pembelajaran FINORA AI")
     st.subheader("🚀 Pilih Fitur Analisis & Pembelajaran")
-    st.caption("Klik tombol pada kartu fitur di bawah ini untuk langsung masuk ke modul yang diinginkan:")
+    st.caption("Klik langsung pada judul/kartu fitur di bawah ini untuk masuk ke modul yang diinginkan:")
+
+    st.markdown("""
+    <style>
+    .dash-card-btn-wrap .stButton > button {
+        background: linear-gradient(135deg, #FFFFFF 0%, #FFF9FB 100%) !important;
+        color: #2D1B24 !important;
+        border: 1px solid #F4C6D2 !important;
+        border-left: 5px solid #FF5C8B !important;
+        border-radius: 14px !important;
+        padding: 16px 18px !important;
+        text-align: left !important;
+        font-weight: 500 !important;
+        box-shadow: 0 3px 12px rgba(122, 31, 61, 0.06) !important;
+        transition: all 0.2s ease !important;
+        min-height: 128px !important;
+        white-space: normal !important;
+        line-height: 1.45 !important;
+    }
+    .dash-card-btn-wrap .stButton > button:hover {
+        background: linear-gradient(135deg, #FFF0F5 0%, #FFF7F2 100%) !important;
+        border-color: #FF5C8B !important;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(255, 92, 139, 0.16) !important;
+    }
+    .dash-card-btn-wrap .stButton > button p {
+        text-align: left !important;
+        margin: 0 !important;
+        font-size: 13.5px !important;
+        color: #3B2831 !important;
+    }
+    .dash-card-btn-wrap .stButton > button p strong {
+        display: block;
+        font-size: 17px !important;
+        font-weight: 800 !important;
+        color: #7A1F3D !important;
+        margin-bottom: 6px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     features = [
         {
-            "icon": "🔎",
-            "title": "Audit Profesional",
-            "desc": "Deteksi otomatis anomali transaksi (duplikasi, transaksi weekend, overbudget, outlier IQR, kata kunci mencurigakan) serta cetak Kertas Kerja Audit (PDF & Excel) + AI Audit Insights.",
-            "btn": "Buka Audit Profesional →",
+            "label": "**🔎 Audit Profesional**\nDeteksi otomatis anomali transaksi (duplikasi, transaksi weekend, overbudget, outlier IQR, kata kunci mencurigakan) serta cetak Kertas Kerja Audit (PDF & Excel) + AI Audit Insights.",
             "target": "Audit Profesional",
         },
         {
-            "icon": "📈",
-            "title": "Analisis Keuangan",
-            "desc": "Evaluasi laporan keuangan Perusahaan Swasta/Tbk maupun Pemerintahan/BLU (APBD/LRA), hitung rasio likuiditas, profitabilitas, solvabilitas, efisiensi, dan AI Financial Advisor.",
-            "btn": "Buka Analisis Keuangan →",
+            "label": "**📈 Analisis Keuangan**\nEvaluasi laporan keuangan Perusahaan Swasta/Tbk maupun Pemerintahan/BLU (APBD/LRA), hitung rasio likuiditas, profitabilitas, solvabilitas, efisiensi, dan AI Financial Advisor.",
             "target": "Analisis Keuangan",
         },
         {
-            "icon": "💧",
-            "title": "Analisis Arus Kas",
-            "desc": "Analisis arus kas berbasis PSAK 207 (Operasi, Investasi, Pendanaan) maupun mutasi transaksi bank, lengkap dengan Free Cash Flow, rasio kas, tren, risiko, dan AI Insights.",
-            "btn": "Buka Analisis Arus Kas →",
+            "label": "**💧 Analisis Arus Kas**\nAnalisis arus kas berbasis PSAK 207 (Operasi, Investasi, Pendanaan) maupun mutasi transaksi bank, lengkap dengan Free Cash Flow, rasio kas, tren, risiko, dan AI Insights.",
             "target": "Analisis Arus Kas",
         },
         {
-            "icon": "📚",
-            "title": "FINORA Study",
-            "desc": "Pusat pembelajaran terstruktur berisi 75 materi lengkap (25 materi Audit, 25 materi Analisis Keuangan, dan 25 materi Analisis Arus Kas) dari level Dasar hingga Lanjutan.",
-            "btn": "Buka FINORA Study →",
+            "label": "**📚 FINORA Study**\nPusat pembelajaran terstruktur berisi 75 materi lengkap (25 materi Audit, 25 materi Analisis Keuangan, dan 25 materi Analisis Arus Kas) dari level Dasar hingga Lanjutan.",
             "target": "FINORA Study",
         },
     ]
@@ -2740,37 +2767,29 @@ def page_dashboard():
     row1 = st.columns(2)
     for idx, feat in enumerate(features[:2]):
         with row1[idx]:
-            st.markdown(f"""
-            <div class="insight-box" style="min-height: 175px; margin-bottom: 10px;">
-                <h4>{feat['icon']} {feat['title']}</h4>
-                <p>{feat['desc']}</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="dash-card-btn-wrap">', unsafe_allow_html=True)
             st.button(
-                feat["btn"],
+                feat["label"],
                 key=f"dash_btn_{feat['target']}",
                 use_container_width=True,
                 on_click=_go_to_nav,
                 args=(feat["target"],)
             )
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     row2 = st.columns(2)
     for idx, feat in enumerate(features[2:]):
         with row2[idx]:
-            st.markdown(f"""
-            <div class="insight-box" style="min-height: 175px; margin-bottom: 10px;">
-                <h4>{feat['icon']} {feat['title']}</h4>
-                <p>{feat['desc']}</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="dash-card-btn-wrap">', unsafe_allow_html=True)
             st.button(
-                feat["btn"],
+                feat["label"],
                 key=f"dash_btn_{feat['target']}",
                 use_container_width=True,
                 on_click=_go_to_nav,
                 args=(feat["target"],)
             )
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.subheader("🕐 Analisis Terakhir")
