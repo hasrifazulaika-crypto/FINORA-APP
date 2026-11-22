@@ -7,12 +7,13 @@ import os
 import io
 import base64
 import hashlib
-import re 
+import re
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from google import genai
-import openpyxl  # <-- MUTLAK DIPERLUKAN UNTUK BYPASS ERROR EXCEL
+import openpyxl
+import streamlit.components.v1 as _components
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -24,45 +25,133 @@ from reportlab.lib import colors
 # ============================================================
 LOGO_FILENAME = "logo.png"
 
+
 def get_base64_image(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
     return ""
 
+
 LOGO_B64 = get_base64_image(LOGO_FILENAME)
 
-st.set_page_config(page_title="FINORA AI - Pro Audit", page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F", layout="wide")
+st.set_page_config(
+    page_title="FINORA AI - Pro Audit",
+    page_icon=LOGO_FILENAME if os.path.exists(LOGO_FILENAME) else "F",
+    layout="wide"
+)
 
 st.markdown("""
 <style>
-:root { --finora-pink: #FF5C8B; --finora-cream: #FFF5E8; --finora-rose: #F8C8D4; --finora-burgundy: #7A1F3D; --finora-text: #2D1B24; }
+:root {
+    --finora-pink: #F5B7C8;
+    --finora-cream: #F6F7D7;
+    --finora-rose: #F5B7C8;
+    --finora-burgundy: #8C3B56;
+    --finora-text: #2D1B24;
+}
 .stApp { background-color: var(--finora-cream); color: var(--finora-text); }
-[data-testid="stSidebar"] { background-color: #FFF0F4; }
-.stButton > button { background-color: var(--finora-pink); color: white !important; border-radius: 12px; border: none; font-weight: 600; padding: 10px 18px; }
+[data-testid="stSidebar"] { background-color: #F6F7D7; }
+.stButton > button {
+    background: linear-gradient(135deg, #F5B7C8 0%, #8C3B56 100%);
+    color: white !important;
+    border-radius: 12px;
+    border: 1px solid #8C3B56;
+    font-weight: 700;
+    padding: 10px 18px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.22);
+}
 .stButton > button:hover { background-color: var(--finora-burgundy); color: white !important; }
 h1, h2, h3 { color: var(--finora-burgundy); }
-.finora-header { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%); color: white; padding: 24px; border-radius: 16px; margin-bottom: 20px; }
+.finora-header {
+    background: linear-gradient(135deg, #F5B7C8 0%, #8C3B56 100%);
+    color: white;
+    padding: 24px;
+    border-radius: 16px;
+    margin-bottom: 20px;
+}
 .finora-header h1 { color: white; margin: 0; font-size: 30px; display: flex; align-items: center; }
-.finora-header p  { color: #FFF0F4; margin: 6px 0 0 0; }
-.metric-card { background: white; padding: 16px; border-radius: 12px; border-left: 4px solid #FF5C8B; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 15px; }
+.finora-header p  { color: #F6F7D7; margin: 6px 0 0 0; }
+.metric-card {
+    background: white;
+    padding: 16px;
+    border-radius: 12px;
+    border-left: 4px solid #F5B7C8;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    margin-bottom: 15px;
+}
 .metric-card p { color: #555; font-size: 14px; margin: 0; font-weight: 600; }
-.metric-card h3 { color: #7A1F3D; margin: 5px 0 0 0; font-size: 24px; font-weight: 700; }
-.insight-box { background-color: white; padding: 20px; border-radius: 10px; border-left: 5px solid #FF5C8B; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
-.insight-box h4 { margin-top: 0; color: #7A1F3D; font-size: 18px; margin-bottom: 10px; }
+.metric-card h3 { color: #8C3B56; margin: 5px 0 0 0; font-size: 24px; font-weight: 700; }
+.insight-box {
+    background-color: white;
+    padding: 20px;
+    border-radius: 10px;
+    border-left: 5px solid #F5B7C8;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+}
+.insight-box h4 { margin-top: 0; color: #8C3B56; font-size: 18px; margin-bottom: 10px; }
 .insight-box p { margin-bottom: 8px; font-size: 14px; line-height: 1.6; color: #333; }
-.ratio-card { background: linear-gradient(135deg, #FFFFFF 0%, #FFF8FA 100%); padding: 18px 20px; border-radius: 14px; border: 1px solid #F8C8D4; border-left: 5px solid #FF5C8B; box-shadow: 0 4px 12px rgba(122, 31, 61, 0.06); margin-bottom: 14px; }
-.ratio-card-muted { background: #FAFAFA; padding: 16px 20px; border-radius: 14px; border: 1px dashed #D8B4C0; margin-bottom: 14px; opacity: 0.9; }
-.ratio-title { font-size: 13px; font-weight: 700; color: #7A1F3D; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+.ratio-card {
+    background: linear-gradient(135deg, #FFFFFF 0%, #F6F7D7 100%);
+    padding: 18px 20px;
+    border-radius: 14px;
+    border: 1px solid #F5B7C8;
+    border-left: 5px solid #F5B7C8;
+    box-shadow: 0 4px 12px rgba(122, 31, 61, 0.06);
+    margin-bottom: 14px;
+}
+.ratio-card-muted {
+    background: #FAFAFA;
+    padding: 16px 20px;
+    border-radius: 14px;
+    border: 1px dashed #D8B4C0;
+    margin-bottom: 14px;
+    opacity: 0.9;
+}
+.ratio-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #8C3B56;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 4px;
+}
 .ratio-val { font-size: 26px; font-weight: 800; color: #2D1B24; margin: 2px 0 6px 0; }
 .ratio-sub { font-size: 12.5px; color: #665058; margin: 0; }
-.badge-ok { display: inline-block; background: #E8F5E9; color: #2E7D32; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 8px; }
-.badge-warn { display: inline-block; background: #FFF3E0; color: #EF6C00; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 8px; }
-.badge-na { display: inline-block; background: #FCE4EC; color: #AD1457; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+.badge-ok {
+    display: inline-block;
+    background: #E8F5E9;
+    color: #2E7D32;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 8px;
+}
+.badge-warn {
+    display: inline-block;
+    background: #FFF3E0;
+    color: #EF6C00;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 8px;
+}
+.badge-na {
+    display: inline-block;
+    background: #FCE4EC;
+    color: #AD1457;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# Mapping konsisten: nama modul audit → key flagged_data
 MODULE_TO_KEY = {
     "Kelengkapan Data": "Kelengkapan Kosong",
     "Data Duplikat": "Duplikasi Ekstrem",
@@ -73,6 +162,7 @@ MODULE_TO_KEY = {
     "Anomali Nominal (Outlier)": "Outlier IQR",
 }
 
+
 def format_rupiah(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "-"
@@ -82,49 +172,64 @@ def format_rupiah(val):
         val = 0.0
     neg = val < 0
     v = abs(val)
-    if v >= 1_000_000_000_000: s = f"Rp {v/1_000_000_000_000:,.2f} T"
-    elif v >= 1_000_000_000:   s = f"Rp {v/1_000_000_000:,.2f} M"
-    elif v >= 1_000_000:       s = f"Rp {v/1_000_000:,.2f} Jt"
-    else:                      s = f"Rp {v:,.0f}"
+    if v >= 1_000_000_000_000:
+        s = f"Rp {v / 1_000_000_000_000:,.2f} T"
+    elif v >= 1_000_000_000:
+        s = f"Rp {v / 1_000_000_000:,.2f} M"
+    elif v >= 1_000_000:
+        s = f"Rp {v / 1_000_000:,.2f} Jt"
+    else:
+        s = f"Rp {v:,.0f}"
     return f"({s})" if neg else s
 
+
 def clean_currency(x):
-    if pd.isna(x): return 0.0
-    if isinstance(x, (int, float, np.number)): return float(x)
+    if pd.isna(x):
+        return 0.0
+    if isinstance(x, (int, float, np.number)):
+        return float(x)
     x = str(x).strip()
     if not x or x.lower() in ("nan", "none", "-", "–", "—"):
         return 0.0
     is_negative = False
-    if x.startswith('(') and x.endswith(')'):
+    if x.startswith("(") and x.endswith(")"):
         is_negative = True
         x = x[1:-1].strip()
-    x = re.sub(r'[^\d,.-]', '', x)
-    if not x: return 0.0
-    if ',' in x and '.' in x:
-        if x.rfind('.') > x.rfind(','): x = x.replace(',', '')
-        else: x = x.replace('.', '').replace(',', '.')
-    elif ',' in x:
-        if len(x.split(',')[-1]) == 3 and x.count(',') >= 1 and not x.startswith('0,'):
-            x = x.replace(',', '')
+    x = re.sub(r"[^\d,.-]", "", x)
+    if not x:
+        return 0.0
+    if "," in x and "." in x:
+        if x.rfind(".") > x.rfind(","):
+            x = x.replace(",", "")
         else:
-            x = x.replace(',', '.')
-    elif '.' in x:
-        if len(x.split('.')[-1]) == 3 and x.count('.') > 0 and not x.startswith('0.'):
-            x = x.replace('.', '')
+            x = x.replace(".", "").replace(",", ".")
+    elif "," in x:
+        if len(x.split(",")[-1]) == 3 and x.count(",") >= 1 and not x.startswith("0,"):
+            x = x.replace(",", "")
+        else:
+            x = x.replace(",", ".")
+    elif "." in x:
+        if len(x.split(".")[-1]) == 3 and x.count(".") > 0 and not x.startswith("0."):
+            x = x.replace(".", "")
     try:
         val = float(x)
         return -val if is_negative else val
     except Exception:
         return 0.0
 
+
 def metric_card(label, value, help_text=""):
-    st.markdown(f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""", unsafe_allow_html=True)
+    st.markdown(
+        f"""<div class="metric-card" title="{help_text}"><p>{label}</p><h3>{value}</h3></div>""",
+        unsafe_allow_html=True
+    )
+
 
 def _clean_headers(raw_headers):
     cleaned = []
     for j, h in enumerate(raw_headers):
         h_str = str(h).strip()
-        if h_str.lower() in ('nan', 'none', ''):
+        if h_str.lower() in ("nan", "none", ""):
             h_str = f"Unnamed_{j}"
         orig, counter = h_str, 2
         while h_str in cleaned:
@@ -133,16 +238,16 @@ def _clean_headers(raw_headers):
         cleaned.append(h_str)
     return cleaned
 
+
 # ============================================================
-# FUNGSI MUTLAK PEMBACA EXCEL (TIDAK PAKAI PANDAS SAMA SEKALI)
+# FUNGSI PEMBACA EXCEL & CSV
 # ============================================================
 def read_excel_sheets(uploaded_file):
-    """Membaca semua sheet dari file Excel/CSV dan mengembalikan dict {sheet_name: DataFrame}."""
     uploaded_file.seek(0)
     bytes_data = uploaded_file.read()
     fname = uploaded_file.name.lower()
 
-    if fname.endswith(('.xlsx', '.xlsm')):
+    if fname.endswith((".xlsx", ".xlsm")):
         file_stream = io.BytesIO(bytes_data)
         wb = openpyxl.load_workbook(file_stream, data_only=True, read_only=True)
         sheets = {}
@@ -156,19 +261,19 @@ def read_excel_sheets(uploaded_file):
         wb.close()
         return sheets if sheets else {"Sheet1": pd.DataFrame()}
     else:
-        for sep in [',', ';', '\t']:
+        for sep in [",", ";", "\t"]:
             try:
                 file_stream = io.BytesIO(bytes_data)
-                df_csv = pd.read_csv(file_stream, header=None, sep=sep, on_bad_lines='skip')
-                if df_csv.shape[1] > 1 or sep == '\t':
+                df_csv = pd.read_csv(file_stream, header=None, sep=sep, on_bad_lines="skip")
+                if df_csv.shape[1] > 1 or sep == "\t":
                     return {"CSV": df_csv.dropna(how="all").reset_index(drop=True)}
             except Exception:
                 continue
         file_stream = io.BytesIO(bytes_data)
-        return {"CSV": pd.read_csv(file_stream, header=None, on_bad_lines='skip').dropna(how="all").reset_index(drop=True)}
+        return {"CSV": pd.read_csv(file_stream, header=None, on_bad_lines="skip").dropna(how="all").reset_index(drop=True)}
+
 
 def read_raw_data(uploaded_file, sheet_name=None):
-    """Membaca file mentah tanpa memicu pandas duplicate column error."""
     sheets = read_excel_sheets(uploaded_file)
     if sheet_name and sheet_name in sheets:
         return sheets[sheet_name]
@@ -180,6 +285,7 @@ def read_raw_data(uploaded_file, sheet_name=None):
             best_df = df_s
     return best_df
 
+
 def safe_read_dataframe(uploaded, header_row=0, sheet_name=None):
     df_raw = read_raw_data(uploaded, sheet_name=sheet_name)
     if header_row >= len(df_raw):
@@ -189,66 +295,110 @@ def safe_read_dataframe(uploaded, header_row=0, sheet_name=None):
     df.columns = cleaned
     return df.reset_index(drop=True)
 
+
 # ============================================================
 # DATABASE
 # ============================================================
 DB_PATH = "finora.db"
+
+
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def init_db():
     conn = get_conn()
     c = conn.cursor()
     c.executescript("""
-    CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT, file_hash TEXT UNIQUE, uploaded_at TEXT);
-    CREATE TABLE IF NOT EXISTS analyses (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, mode TEXT, selected_modules TEXT, status TEXT, summary_json TEXT, created_at TEXT);
-    CREATE TABLE IF NOT EXISTS findings (id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_id INTEGER, module TEXT, risk_level TEXT, title TEXT, detail TEXT, recommendation TEXT);
+    CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT,
+        file_hash TEXT UNIQUE,
+        uploaded_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS analyses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INTEGER,
+        mode TEXT,
+        selected_modules TEXT,
+        status TEXT,
+        summary_json TEXT,
+        created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        analysis_id INTEGER,
+        module TEXT,
+        risk_level TEXT,
+        title TEXT,
+        detail TEXT,
+        recommendation TEXT
+    );
     """)
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
+
+
 init_db()
+
 
 def save_file(filename, content_bytes):
     file_hash = hashlib.md5(content_bytes).hexdigest()
-    conn = get_conn(); c = conn.cursor()
+    conn = get_conn()
+    c = conn.cursor()
     c.execute("SELECT id FROM files WHERE file_hash=?", (file_hash,))
     row = c.fetchone()
     if row:
-        conn.close(); return row["id"]
-    c.execute("INSERT INTO files(filename, file_hash, uploaded_at) VALUES (?,?,?)", (filename, file_hash, datetime.now().isoformat()))
-    fid = c.lastrowid; conn.commit(); conn.close()
+        conn.close()
+        return row["id"]
+    c.execute(
+        "INSERT INTO files(filename, file_hash, uploaded_at) VALUES (?,?,?)",
+        (filename, file_hash, datetime.now().isoformat())
+    )
+    fid = c.lastrowid
+    conn.commit()
+    conn.close()
     return fid
 
+
 def save_analysis(file_id, mode, selected_modules, summary):
-    conn = get_conn(); c = conn.cursor()
-    c.execute("INSERT INTO analyses(file_id, mode, selected_modules, status, summary_json, created_at) VALUES (?,?,?,?,?,?)",
-              (file_id, mode, json.dumps(selected_modules), "completed", json.dumps(summary, default=str), datetime.now().isoformat()))
-    aid = c.lastrowid; conn.commit(); conn.close()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO analyses(file_id, mode, selected_modules, status, summary_json, created_at) VALUES (?,?,?,?,?,?)",
+        (file_id, mode, json.dumps(selected_modules), "completed", json.dumps(summary, default=str), datetime.now().isoformat())
+    )
+    aid = c.lastrowid
+    conn.commit()
+    conn.close()
     return aid
 
+
 def save_findings(analysis_id, findings):
-    if not findings: return
-    conn = get_conn(); c = conn.cursor()
+    if not findings:
+        return
+    conn = get_conn()
+    c = conn.cursor()
     for f in findings:
-        c.execute("INSERT INTO findings(analysis_id, module, risk_level, title, detail, recommendation) VALUES (?,?,?,?,?,?)",
-                  (analysis_id, f["module"], f["risk_level"], f["title"], f["detail"], f["recommendation"]))
-    conn.commit(); conn.close()
+        c.execute(
+            "INSERT INTO findings(analysis_id, module, risk_level, title, detail, recommendation) VALUES (?,?,?,?,?,?)",
+            (analysis_id, f["module"], f["risk_level"], f["title"], f["detail"], f["recommendation"])
+        )
+    conn.commit()
+    conn.close()
+
 
 def fetch_analyses():
     conn = get_conn()
-    df = pd.read_sql_query("SELECT a.id, f.filename, a.mode, a.created_at FROM analyses a JOIN files f ON a.file_id = f.id ORDER BY a.created_at DESC", conn)
-    conn.close(); return df
+    df = pd.read_sql_query(
+        "SELECT a.id, f.filename, a.mode, a.created_at FROM analyses a JOIN files f ON a.file_id = f.id ORDER BY a.created_at DESC",
+        conn
+    )
+    conn.close()
+    return df
 
-def fetch_analysis_by_id(aid):
-    conn = get_conn()
-    df = pd.read_sql_query("SELECT a.id, a.summary_json, f.filename FROM analyses a JOIN files f ON a.file_id = f.id WHERE a.id=?", conn, params=(aid,))
-    conn.close(); return df.iloc[0] if not df.empty else None
-
-def fetch_findings(aid):
-    conn = get_conn()
-    df = pd.read_sql_query("SELECT * FROM findings WHERE analysis_id=?", conn, params=(aid,))
-    conn.close(); return df
 
 # ============================================================
 # AI ENGINE
@@ -259,11 +409,12 @@ def get_gemini_client():
         api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
     except Exception:
         api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key: return None
+    if not api_key:
+        return None
     return genai.Client(api_key=api_key)
 
+
 def _get_candidate_gemini_models(client):
-    """Mengembalikan urutan model Gemini aktif yang tersedia (mendukung Gemini 3.x / 2.5 / fallback otomatis)."""
     preferred = [
         "gemini-3.0-flash",
         "gemini-3-flash-preview",
@@ -291,11 +442,11 @@ def _get_candidate_gemini_models(client):
         al = a.lower()
         if any(k in al for k in ["flash", "pro"]) and not any(bk in al for bk in blocked_keywords) and a not in ordered:
             ordered.append(a)
-    # Pastikan model teks standar selalu ada di depan meski list API mengembalikan model khusus
     for text_default in ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]:
         if text_default not in ordered:
             ordered.append(text_default)
     return ordered
+
 
 def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profesional"):
     try:
@@ -326,7 +477,6 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
             except Exception as model_err:
                 last_err = model_err
                 err_str = str(model_err)
-                # Jika model tidak ditemukan (404), tidak didukung, atau kuota model khusus limit 0 (429), lanjut ke model teks berikutnya
                 if (
                     "404" in err_str
                     or "NOT_FOUND" in err_str
@@ -340,8 +490,15 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
     except Exception as e:
         yield f"\n\n⚠️ Terjadi kesalahan saat menghubungi Gemini AI: {str(e)}"
 
-def render_ai_guided_panel(panel_key, context_text, system_role, auto_prompt, preset_questions, panel_title="🤖 Analisis Otomatis & Tanya Jawab Terarah (Gemini AI)"):
-    """Menampilkan analisis otomatis Gemini AI terlebih dahulu, lalu menyediakan pilihan pertanyaan terarah + input bebas."""
+
+def render_ai_guided_panel(
+    panel_key,
+    context_text,
+    system_role,
+    auto_prompt,
+    preset_questions,
+    panel_title="🤖 Analisis Otomatis & Tanya Jawab Terarah (Gemini AI)"
+):
     st.markdown(f"### {panel_title}")
     st.caption("Hasil analisis awal dibuat otomatis oleh Gemini AI berdasarkan data di atas. Selanjutnya Anda dapat memilih pertanyaan terarah di bawah ini.")
 
@@ -412,6 +569,7 @@ def render_ai_guided_panel(panel_key, context_text, system_role, auto_prompt, pr
         st.session_state[hist_state_key].append({"role": "assistant", "content": ans})
         st.rerun()
 
+
 # ============================================================
 # AUDIT ENGINE
 # ============================================================
@@ -419,38 +577,64 @@ def auto_detect_columns(df):
     mapping = {"date": None, "amount": None, "desc": None, "budget": None, "invoice": None}
     for col in df.columns:
         c = str(col).lower()
-        if not mapping["date"] and any(k in c for k in ["tanggal", "tgl", "date", "waktu", "periode"]): mapping["date"] = col
-        if not mapping["amount"] and any(k in c for k in ["actual", "realisasi", "nominal", "jumlah", "total", "nilai", "amount", "harga", "debit", "kredit"]): mapping["amount"] = col
-        if not mapping["budget"] and any(k in c for k in ["anggaran", "budget", "pagu"]): mapping["budget"] = col
-        if not mapping["desc"] and any(k in c for k in ["deskripsi", "keterangan", "uraian", "category", "kategori", "nama", "item", "barang"]): mapping["desc"] = col
-        if not mapping["invoice"] and any(k in c for k in ["invoice", "faktur", "nota", "ref", "no."]): mapping["invoice"] = col
+        if not mapping["date"] and any(k in c for k in ["tanggal", "tgl", "date", "waktu", "periode"]):
+            mapping["date"] = col
+        if not mapping["amount"] and any(k in c for k in ["actual", "realisasi", "nominal", "jumlah", "total", "nilai", "amount", "harga", "debit", "kredit"]):
+            mapping["amount"] = col
+        if not mapping["budget"] and any(k in c for k in ["anggaran", "budget", "pagu"]):
+            mapping["budget"] = col
+        if not mapping["desc"] and any(k in c for k in ["deskripsi", "keterangan", "uraian", "category", "kategori", "nama", "item", "barang"]):
+            mapping["desc"] = col
+        if not mapping["invoice"] and any(k in c for k in ["invoice", "faktur", "nota", "ref", "no."]):
+            mapping["invoice"] = col
     for col in df.columns:
         sample = df[col].dropna().astype(str).head(20)
-        if sample.empty: continue
-        if not mapping["date"] and pd.to_datetime(sample, errors='coerce', dayfirst=True).notna().sum() > len(sample) * 0.5: mapping["date"] = col
-        elif not mapping["amount"] and col != mapping["date"] and sample.str.replace(r'[^\d.-]', '', regex=True).str.isnumeric().sum() > len(sample) * 0.5: mapping["amount"] = col
-    if not mapping["date"] and len(df.columns) > 0: mapping["date"] = df.columns[0]
-    if not mapping["amount"] and len(df.columns) > 1: mapping["amount"] = df.columns[1]
+        if sample.empty:
+            continue
+        if not mapping["date"] and pd.to_datetime(sample, errors="coerce", dayfirst=True).notna().sum() > len(sample) * 0.5:
+            mapping["date"] = col
+        elif not mapping["amount"] and col != mapping["date"] and sample.str.replace(r"[^\d.-]", "", regex=True).str.isnumeric().sum() > len(sample) * 0.5:
+            mapping["amount"] = col
+    if not mapping["date"] and len(df.columns) > 0:
+        mapping["date"] = df.columns[0]
+    if not mapping["amount"] and len(df.columns) > 1:
+        mapping["amount"] = df.columns[1]
     return mapping
+
 
 def audit_empty(df, cols_to_check):
     findings, flagged = [], pd.DataFrame()
     masks = [df[c].isna() for c in cols_to_check if c]
     if masks:
         combined_mask = masks[0]
-        for m in masks[1:]: combined_mask |= m
+        for m in masks[1:]:
+            combined_mask |= m
         flagged = df[combined_mask]
         if not flagged.empty:
-            findings.append({"module": "Kelengkapan Data", "risk_level": "Tinggi", "title": f"{len(flagged)} baris memiliki data vital kosong", "detail": "Ada data kosong pada kolom Tanggal/Nominal/Deskripsi.", "recommendation": "Lengkapi data sebelum diproses."})
+            findings.append({
+                "module": "Kelengkapan Data",
+                "risk_level": "Tinggi",
+                "title": f"{len(flagged)} baris memiliki data vital kosong",
+                "detail": "Ada data kosong pada kolom Tanggal/Nominal/Deskripsi.",
+                "recommendation": "Lengkapi data sebelum diproses."
+            })
     return findings, flagged
+
 
 def audit_duplicates(df, cols_to_check):
     findings, flagged = [], pd.DataFrame()
     if cols_to_check:
         flagged = df[df.duplicated(subset=cols_to_check, keep=False)]
         if not flagged.empty:
-            findings.append({"module": "Data Duplikat", "risk_level": "Tinggi", "title": f"{len(flagged)} baris transaksi ganda (100% sama)", "detail": "Terdapat transaksi dengan nilai/deskripsi yang sama persis.", "recommendation": "Pastikan bukan input dua kali (double-entry)."})
+            findings.append({
+                "module": "Data Duplikat",
+                "risk_level": "Tinggi",
+                "title": f"{len(flagged)} baris transaksi ganda (100% sama)",
+                "detail": "Terdapat transaksi dengan nilai/deskripsi yang sama persis.",
+                "recommendation": "Pastikan bukan input dua kali (double-entry)."
+            })
     return findings, flagged
+
 
 def audit_negative(df, amount_col):
     findings, flagged = [], pd.DataFrame()
@@ -458,8 +642,15 @@ def audit_negative(df, amount_col):
         s = pd.to_numeric(df[amount_col], errors="coerce")
         flagged = df[s < 0]
         if not flagged.empty:
-            findings.append({"module": "Observasi Nilai Negatif", "risk_level": "Rendah", "title": f"{len(flagged)} transaksi bernilai negatif", "detail": "Ditemukan nilai minus pada kolom nominal.", "recommendation": "Lakukan uji petik untuk memastikan transaksi negatif memiliki memo retur/koreksi."})
+            findings.append({
+                "module": "Observasi Nilai Negatif",
+                "risk_level": "Rendah",
+                "title": f"{len(flagged)} transaksi bernilai negatif",
+                "detail": "Ditemukan nilai minus pada kolom nominal.",
+                "recommendation": "Lakukan uji petik untuk memastikan transaksi negatif memiliki memo retur/koreksi."
+            })
     return findings, flagged
+
 
 def audit_overbudget(df, budget_col, amount_col):
     findings, flagged = [], pd.DataFrame()
@@ -469,9 +660,17 @@ def audit_overbudget(df, budget_col, amount_col):
             a = pd.to_numeric(df[amount_col], errors="coerce").fillna(0)
             flagged = df[a > b]
             if not flagged.empty:
-                findings.append({"module": "Overbudget (Melebihi Pagu)", "risk_level": "Tinggi", "title": f"{len(flagged)} akun melebihi pagu anggaran", "detail": "Nilai realisasi lebih besar daripada anggaran.", "recommendation": "Minta penjelasan terkait kelebihan anggaran."})
-        except: pass
+                findings.append({
+                    "module": "Overbudget (Melebihi Pagu)",
+                    "risk_level": "Tinggi",
+                    "title": f"{len(flagged)} akun melebihi pagu anggaran",
+                    "detail": "Nilai realisasi lebih besar daripada anggaran.",
+                    "recommendation": "Minta penjelasan terkait kelebihan anggaran."
+                })
+        except Exception:
+            pass
     return findings, flagged
+
 
 def audit_weekend(df, date_col):
     findings, flagged = [], pd.DataFrame()
@@ -480,21 +679,37 @@ def audit_weekend(df, date_col):
             dates = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
             flagged = df[dates.dt.dayofweek >= 5]
             if not flagged.empty:
-                findings.append({"module": "Transaksi Weekend", "risk_level": "Tinggi", "title": f"{len(flagged)} transaksi di hari Sabtu/Minggu", "detail": "Transaksi di luar hari kerja.", "recommendation": "Periksa otorisasi transaksi akhir pekan."})
-        except: pass
+                findings.append({
+                    "module": "Transaksi Weekend",
+                    "risk_level": "Tinggi",
+                    "title": f"{len(flagged)} transaksi di hari Sabtu/Minggu",
+                    "detail": "Transaksi di luar hari kerja.",
+                    "recommendation": "Periksa otorisasi transaksi akhir pekan."
+                })
+        except Exception:
+            pass
     return findings, flagged
+
 
 def audit_suspicious_words(df, desc_col):
     findings, flagged = [], pd.DataFrame()
     keywords = ["adjustment", "adj", "void", "koreksi", "manual", "write-off", "hapus"]
     if desc_col:
         try:
-            pattern = '|'.join(keywords)
+            pattern = "|".join(keywords)
             flagged = df[df[desc_col].astype(str).str.lower().str.contains(pattern, na=False)]
             if not flagged.empty:
-                findings.append({"module": "Kata Kunci Mencurigakan", "risk_level": "Sedang", "title": f"{len(flagged)} transaksi mengandung kata kunci adjustment/void", "detail": "Transaksi manual sering menjadi celah manipulasi.", "recommendation": "Minta penjelasan tertulis dari pembuat jurnal."})
-        except: pass
+                findings.append({
+                    "module": "Kata Kunci Mencurigakan",
+                    "risk_level": "Sedang",
+                    "title": f"{len(flagged)} transaksi mengandung kata kunci adjustment/void",
+                    "detail": "Transaksi manual sering menjadi celah manipulasi.",
+                    "recommendation": "Minta penjelasan tertulis dari pembuat jurnal."
+                })
+        except Exception:
+            pass
     return findings, flagged
+
 
 def audit_outliers_iqr(df, amount_col):
     findings, flagged = [], pd.DataFrame()
@@ -502,14 +717,22 @@ def audit_outliers_iqr(df, amount_col):
         try:
             s = pd.to_numeric(df[amount_col], errors="coerce").dropna()
             if not s.empty:
-                Q1, Q3 = s.quantile(0.25), s.quantile(0.75)
-                IQR = Q3 - Q1
-                lower, upper = Q1 - 1.5 * IQR, Q3 + 1.5 * IQR
+                q1, q3 = s.quantile(0.25), s.quantile(0.75)
+                iqr = q3 - q1
+                lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
                 flagged = df[(pd.to_numeric(df[amount_col], errors="coerce") < lower) | (pd.to_numeric(df[amount_col], errors="coerce") > upper)]
                 if not flagged.empty:
-                    findings.append({"module": "Anomali Nominal (Outlier)", "risk_level": "Tinggi", "title": f"{len(flagged)} nilai ekstrem (di luar batas IQR)", "detail": f"Batas wajar: {lower:,.0f} s.d {upper:,.0f}", "recommendation": "Uji petik transaksi terbesar/terkecil."})
-        except: pass
+                    findings.append({
+                        "module": "Anomali Nominal (Outlier)",
+                        "risk_level": "Tinggi",
+                        "title": f"{len(flagged)} nilai ekstrem (di luar batas IQR)",
+                        "detail": f"Batas wajar: {lower:,.0f} s.d {upper:,.0f}",
+                        "recommendation": "Uji petik transaksi terbesar/terkecil."
+                    })
+        except Exception:
+            pass
     return findings, flagged
+
 
 # ============================================================
 # SMART FINANCIAL ENGINE & INSIGHT
@@ -535,6 +758,7 @@ def _detect_fin_header_row(raw_df, max_scan=60):
             best_idx = i
     return best_idx
 
+
 def _detect_fin_columns(df):
     cols = list(df.columns)
     name_col = None
@@ -544,7 +768,6 @@ def _detect_fin_columns(df):
         s = s[~s.str.lower().isin(["nan", "none", ""])]
         if s.empty:
             continue
-        # Kolom uraian/akun biasanya berisi banyak teks huruf (bukan sekadar kode angka)
         alpha_ratio = s.str.contains(r"[a-zA-Z]{3,}", regex=True).mean()
         avg_len = s.str.len().mean()
         header_bonus = 5.0 if any(k in str(c).lower() for k in ["uraian", "akun", "keterangan", "pos", "komponen", "deskripsi", "nama"]) else 0.0
@@ -574,7 +797,6 @@ def _detect_fin_columns(df):
         elif not ang_col and any(k in c_str for k in ["anggaran", "ang", "pagu", "target", "budget"]):
             ang_col = c
 
-    # Urutkan kolom tahun jika header berupa tahun (mis. 2024 vs 2023)
     year_cols = []
     for c in numeric_cols:
         m = re.search(r"\b(20\d{2}|19\d{2})\b", str(c))
@@ -605,6 +827,7 @@ def _detect_fin_columns(df):
         "numeric_cols": numeric_cols,
     }
 
+
 def auto_extract_financials(df, entity_type, name_col=None, real_col=None, ang_col=None, prev_col=None):
     results = {
         "pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0,
@@ -628,8 +851,8 @@ def auto_extract_financials(df, entity_type, name_col=None, real_col=None, ang_c
         df[name_col]
         .astype(str)
         .str.lower()
-        .str.replace(r'[^a-z\s]', ' ', regex=True)
-        .str.replace(r'\s+', ' ', regex=True)
+        .str.replace(r"[^a-z\s]", " ", regex=True)
+        .str.replace(r"\s+", " ", regex=True)
         .str.strip()
     )
 
@@ -649,7 +872,6 @@ def auto_extract_financials(df, entity_type, name_col=None, real_col=None, ang_c
                 s_exact = val_series.loc[mask_exact]
                 non_zero_exact = s_exact[s_exact != 0]
                 if not non_zero_exact.empty:
-                    # Jika ada beberapa baris total persis sama (misal header & total), ambil nilai absolut terbesar agar tidak double-count
                     return float(non_zero_exact.loc[non_zero_exact.abs().idxmax()])
         if contains_keys:
             for key in contains_keys:
@@ -674,52 +896,52 @@ def auto_extract_financials(df, entity_type, name_col=None, real_col=None, ang_c
 
     if "Pemerintahan" in entity_type:
         pendapatan_exact = [
-            'total pendapatan', 'jumlah pendapatan', 'pendapatan daerah',
-            'pendapatan lra', 'jumlah pendapatan daerah', 'total pendapatan daerah',
-            'jumlah pendapatan negara', 'pendapatan negara dan hibah'
+            "total pendapatan", "jumlah pendapatan", "pendapatan daerah",
+            "pendapatan lra", "jumlah pendapatan daerah", "total pendapatan daerah",
+            "jumlah pendapatan negara", "pendapatan negara dan hibah"
         ]
-        pendapatan_comp = ['pendapatan asli daerah', 'pendapatan transfer', 'dana perimbangan', 'dana transfer', 'lain lain pendapatan']
+        pendapatan_comp = ["pendapatan asli daerah", "pendapatan transfer", "dana perimbangan", "dana transfer", "lain lain pendapatan"]
         belanja_exact = [
-            'total belanja', 'jumlah belanja', 'belanja daerah',
-            'jumlah belanja daerah', 'total belanja daerah', 'belanja dan transfer',
-            'jumlah belanja dan transfer', 'total belanja negara'
+            "total belanja", "jumlah belanja", "belanja daerah",
+            "jumlah belanja daerah", "total belanja daerah", "belanja dan transfer",
+            "jumlah belanja dan transfer", "total belanja negara"
         ]
-        belanja_comp = ['belanja operasi', 'belanja modal', 'belanja tak terduga', 'belanja transfer', 'belanja pegawai', 'belanja barang']
+        belanja_comp = ["belanja operasi", "belanja modal", "belanja tak terduga", "belanja transfer", "belanja pegawai", "belanja barang"]
 
-        real_p = get_total(real_vals, pendapatan_exact, ['jumlah pendapatan', 'total pendapatan', 'pendapatan daerah'])
+        real_p = get_total(real_vals, pendapatan_exact, ["jumlah pendapatan", "total pendapatan", "pendapatan daerah"])
         if real_p == 0:
             real_p = sum_components(real_vals, pendapatan_comp)
         if real_p == 0:
-            real_p = get_total(real_vals, ['pendapatan'], ['pendapatan'])
+            real_p = get_total(real_vals, ["pendapatan"], ["pendapatan"])
 
-        ang_p = get_total(ang_vals, pendapatan_exact, ['jumlah pendapatan', 'total pendapatan', 'pendapatan daerah'])
+        ang_p = get_total(ang_vals, pendapatan_exact, ["jumlah pendapatan", "total pendapatan", "pendapatan daerah"])
         if ang_p == 0:
             ang_p = sum_components(ang_vals, pendapatan_comp)
         if ang_p == 0:
-            ang_p = get_total(ang_vals, ['pendapatan'], ['pendapatan'])
+            ang_p = get_total(ang_vals, ["pendapatan"], ["pendapatan"])
 
-        prev_p = get_total(prev_vals, pendapatan_exact, ['jumlah pendapatan', 'total pendapatan', 'pendapatan daerah'])
+        prev_p = get_total(prev_vals, pendapatan_exact, ["jumlah pendapatan", "total pendapatan", "pendapatan daerah"])
         if prev_p == 0:
             prev_p = sum_components(prev_vals, pendapatan_comp)
 
-        real_b = get_total(real_vals, belanja_exact, ['jumlah belanja', 'total belanja', 'belanja daerah'])
+        real_b = get_total(real_vals, belanja_exact, ["jumlah belanja", "total belanja", "belanja daerah"])
         if real_b == 0:
             real_b = sum_components(real_vals, belanja_comp)
         if real_b == 0:
-            real_b = get_total(real_vals, ['belanja', 'beban'], ['belanja', 'beban'])
+            real_b = get_total(real_vals, ["belanja", "beban"], ["belanja", "beban"])
 
-        ang_b = get_total(ang_vals, belanja_exact, ['jumlah belanja', 'total belanja', 'belanja daerah'])
+        ang_b = get_total(ang_vals, belanja_exact, ["jumlah belanja", "total belanja", "belanja daerah"])
         if ang_b == 0:
             ang_b = sum_components(ang_vals, belanja_comp)
         if ang_b == 0:
-            ang_b = get_total(ang_vals, ['belanja', 'beban'], ['belanja', 'beban'])
+            ang_b = get_total(ang_vals, ["belanja", "beban"], ["belanja", "beban"])
 
         pad = get_total(
             real_vals,
-            ['pendapatan asli daerah', 'jumlah pendapatan asli daerah', 'total pendapatan asli daerah', 'pad', 'pendapatan asli daerah pad'],
-            ['pendapatan asli daerah', 'pad']
+            ["pendapatan asli daerah", "jumlah pendapatan asli daerah", "total pendapatan asli daerah", "pad", "pendapatan asli daerah pad"],
+            ["pendapatan asli daerah", "pad"]
         )
-        surplus = get_total(real_vals, ['surplus defisit', 'surplus defisit lra', 'surplus defisit lo'], ['surplus', 'defisit'])
+        surplus = get_total(real_vals, ["surplus defisit", "surplus defisit lra", "surplus defisit lo"], ["surplus", "defisit"])
         if surplus == 0 and (real_p != 0 or real_b != 0):
             surplus = real_p - real_b
 
@@ -728,30 +950,38 @@ def auto_extract_financials(df, entity_type, name_col=None, real_col=None, ang_c
             "real_belanja": real_b, "ang_belanja": ang_b, "pad": pad, "surplus": surplus
         })
     else:
-        results["pendapatan"] = get_total(real_vals, ['total pendapatan', 'jumlah pendapatan', 'pendapatan', 'total penjualan', 'penjualan', 'pendapatan usaha'], ['total pendapatan', 'total penjualan', 'pendapatan', 'penjualan', 'revenue'])
-        results["prev_pendapatan"] = get_total(prev_vals, ['total pendapatan', 'jumlah pendapatan', 'pendapatan', 'total penjualan', 'penjualan', 'pendapatan usaha'], ['total pendapatan', 'total penjualan', 'pendapatan', 'penjualan', 'revenue'])
-        results["laba"] = get_total(real_vals, ['laba bersih', 'laba tahun berjalan', 'laba periode berjalan', 'laba rugi bersih'], ['laba bersih', 'laba tahun berjalan', 'net income', 'laba'])
-        results["total_aset"] = get_total(real_vals, ['total aset', 'jumlah aset', 'total aktiva', 'jumlah aktiva'], ['total aset', 'jumlah aset', 'total asset'])
-        results["ekuitas"] = get_total(real_vals, ['total ekuitas', 'jumlah ekuitas', 'total modal', 'jumlah modal'], ['total ekuitas', 'jumlah ekuitas', 'total equity', 'ekuitas'])
-        results["total_liabilitas"] = get_total(real_vals, ['total liabilitas', 'jumlah liabilitas', 'total utang', 'total kewajiban'], ['total liabilitas', 'jumlah liabilitas', 'total utang', 'total kewajiban'])
-        results["aset_lancar"] = get_total(real_vals, ['total aset lancar', 'jumlah aset lancar', 'aset lancar'], ['aset lancar', 'current asset'])
-        results["liabilitas_lancar"] = get_total(real_vals, ['total liabilitas jangka pendek', 'jumlah liabilitas jangka pendek', 'total utang lancar', 'liabilitas lancar'], ['liabilitas jangka pendek', 'liabilitas lancar', 'utang lancar', 'current liab'])
+        results["pendapatan"] = get_total(real_vals, ["total pendapatan", "jumlah pendapatan", "pendapatan", "total penjualan", "penjualan", "pendapatan usaha"], ["total pendapatan", "total penjualan", "pendapatan", "penjualan", "revenue"])
+        results["prev_pendapatan"] = get_total(prev_vals, ["total pendapatan", "jumlah pendapatan", "pendapatan", "total penjualan", "penjualan", "pendapatan usaha"], ["total pendapatan", "total penjualan", "pendapatan", "penjualan", "revenue"])
+        results["laba"] = get_total(real_vals, ["laba bersih", "laba tahun berjalan", "laba periode berjalan", "laba rugi bersih"], ["laba bersih", "laba tahun berjalan", "net income", "laba"])
+        results["total_aset"] = get_total(real_vals, ["total aset", "jumlah aset", "total aktiva", "jumlah aktiva"], ["total aset", "jumlah aset", "total asset"])
+        results["ekuitas"] = get_total(real_vals, ["total ekuitas", "jumlah ekuitas", "total modal", "jumlah modal"], ["total ekuitas", "jumlah ekuitas", "total equity", "ekuitas"])
+        results["total_liabilitas"] = get_total(real_vals, ["total liabilitas", "jumlah liabilitas", "total utang", "total kewajiban"], ["total liabilitas", "jumlah liabilitas", "total utang", "total kewajiban"])
+        results["aset_lancar"] = get_total(real_vals, ["total aset lancar", "jumlah aset lancar", "aset lancar"], ["aset lancar", "current asset"])
+        results["liabilitas_lancar"] = get_total(real_vals, ["total liabilitas jangka pendek", "jumlah liabilitas jangka pendek", "total utang lancar", "liabilitas lancar"], ["liabilitas jangka pendek", "liabilitas lancar", "utang lancar", "current liab"])
     return results
+
 
 def hitung_rasio_dari_nilai(nilai, entity_type):
     rasio = {}
     if "Pemerintahan" in entity_type:
-        real_p = nilai.get("real_pendapatan", 0); ang_p = nilai.get("ang_pendapatan", 0)
-        real_b = nilai.get("real_belanja", 0); ang_b = nilai.get("ang_belanja", 0); pad = nilai.get("pad", 0)
+        real_p = nilai.get("real_pendapatan", 0)
+        ang_p = nilai.get("ang_pendapatan", 0)
+        real_b = nilai.get("real_belanja", 0)
+        ang_b = nilai.get("ang_belanja", 0)
+        pad = nilai.get("pad", 0)
         rasio["Efektivitas Pendapatan (%)"] = round((real_p / ang_p) * 100, 2) if ang_p > 0 else 0.0
         rasio["Efisiensi Belanja (%)"] = round((real_b / ang_b) * 100, 2) if ang_b > 0 else 0.0
         rasio["Kemandirian Daerah (%)"] = round((pad / real_p) * 100, 2) if real_p > 0 else 0.0
         prev_p = nilai.get("prev_pendapatan", 0)
-        rasio["Pertumbuhan Pendapatan (%)"] = round(((real_p - prev_p) / prev_p) * 100, 2) if prev_p > 0 and prev_p != nilai.get("ang_pendapatan", 0) else 0.0 
+        rasio["Pertumbuhan Pendapatan (%)"] = round(((real_p - prev_p) / prev_p) * 100, 2) if prev_p > 0 and prev_p != nilai.get("ang_pendapatan", 0) else 0.0
     else:
-        pendapatan = nilai.get("pendapatan", 0); laba = nilai.get("laba", 0)
-        aset_lancar = nilai.get("aset_lancar", 0); liab_lancar = nilai.get("liabilitas_lancar", 0)
-        total_aset = nilai.get("total_aset", 0); total_liab = nilai.get("total_liabilitas", 0); ekuitas = nilai.get("ekuitas", 0)
+        pendapatan = nilai.get("pendapatan", 0)
+        laba = nilai.get("laba", 0)
+        aset_lancar = nilai.get("aset_lancar", 0)
+        liab_lancar = nilai.get("liabilitas_lancar", 0)
+        total_aset = nilai.get("total_aset", 0)
+        total_liab = nilai.get("total_liabilitas", 0)
+        ekuitas = nilai.get("ekuitas", 0)
         rasio["Current Ratio (x)"] = round(aset_lancar / liab_lancar, 2) if liab_lancar > 0 else 0.0
         rasio["Net Profit Margin (%)"] = round((laba / pendapatan) * 100, 2) if pendapatan > 0 else 0.0
         rasio["ROA (%)"] = round((laba / total_aset) * 100, 2) if total_aset > 0 else 0.0
@@ -759,73 +989,114 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
         rasio["Debt to Equity (x)"] = round(total_liab / ekuitas, 2) if ekuitas > 0 else 0.0
     return rasio
 
+
 def get_detailed_insight(ratio_name, val):
     if val == 0 or pd.isna(val):
-        if "Pertumbuhan" in ratio_name: return "<b>Kondisi:</b> 0% (Tidak Ada Data).<br><b>Penyebab:</b> Butuh data tahun sebelumnya.<br><b>Dampak:</b> Tidak bisa lihat tren.<br><b>Rekomendasi:</b> Simpan laporan tahun ini, bandingkan tahun depan."
-        elif "Efektivitas" in ratio_name: return "<b>Kondisi:</b> Rasio 0%.<br><b>Penyebab:</b> Anggaran Pendapatan bernilai 0.<br><b>Dampak:</b> Tidak bisa ukur kinerja.<br><b>Rekomendasi:</b> Periksa kolom Anggaran Pendapatan."
-        elif "Efisiensi" in ratio_name: return "<b>Kondisi:</b> Rasio 0%.<br><b>Penyebab:</b> Anggaran Belanja bernilai 0.<br><b>Dampak:</b> Tidak bisa ukur penyerapan.<br><b>Rekomendasi:</b> Pastikan kolom Anggaran Belanja valid."
-        elif "Kemandirian" in ratio_name: return "<b>Kondisi:</b> 0%.<br><b>Penyebab:</b> PAD atau Pendapatan 0.<br><b>Dampak:</b> Tidak Mandiri.<br><b>Rekomendasi:</b> Lakukan ekstensifikasi pajak."
-        elif "Current Ratio" in ratio_name: return "<b>Kondisi:</b> 0x.<br><b>Penyebab:</b> Aset Lancar 0.<br><b>Dampak:</b> Risiko Likuiditas Ekstrem.<br><b>Rekomendasi:</b> Tambah modal kerja."
-        elif "Debt to Equity" in ratio_name: return "<b>Kondisi:</b> 0x.<br><b>Penyebab:</b> Tidak ada utang.<br><b>Dampak:</b> Sangat Aman.<br><b>Rekomendasi:</b> Bisa mulai gunakan utang produktif."
-        else: return "<b>Kondisi:</b> Rasio tidak dapat dihitung.<br><b>Rekomendasi:</b> Periksa format Excel."
+        if "Pertumbuhan" in ratio_name:
+            return "<b>Kondisi:</b> 0% (Tidak Ada Data).<br><b>Penyebab:</b> Butuh data tahun sebelumnya.<br><b>Dampak:</b> Tidak bisa lihat tren.<br><b>Rekomendasi:</b> Simpan laporan tahun ini, bandingkan tahun depan."
+        elif "Efektivitas" in ratio_name:
+            return "<b>Kondisi:</b> Rasio 0%.<br><b>Penyebab:</b> Anggaran Pendapatan bernilai 0.<br><b>Dampak:</b> Tidak bisa ukur kinerja.<br><b>Rekomendasi:</b> Periksa kolom Anggaran Pendapatan."
+        elif "Efisiensi" in ratio_name:
+            return "<b>Kondisi:</b> Rasio 0%.<br><b>Penyebab:</b> Anggaran Belanja bernilai 0.<br><b>Dampak:</b> Tidak bisa ukur penyerapan.<br><b>Rekomendasi:</b> Pastikan kolom Anggaran Belanja valid."
+        elif "Kemandirian" in ratio_name:
+            return "<b>Kondisi:</b> 0%.<br><b>Penyebab:</b> PAD atau Pendapatan 0.<br><b>Dampak:</b> Tidak Mandiri.<br><b>Rekomendasi:</b> Lakukan ekstensifikasi pajak."
+        elif "Current Ratio" in ratio_name:
+            return "<b>Kondisi:</b> 0x.<br><b>Penyebab:</b> Aset Lancar 0.<br><b>Dampak:</b> Risiko Likuiditas Ekstrem.<br><b>Rekomendasi:</b> Tambah modal kerja."
+        elif "Debt to Equity" in ratio_name:
+            return "<b>Kondisi:</b> 0x.<br><b>Penyebab:</b> Tidak ada utang.<br><b>Dampak:</b> Sangat Aman.<br><b>Rekomendasi:</b> Bisa mulai gunakan utang produktif."
+        else:
+            return "<b>Kondisi:</b> Rasio tidak dapat dihitung.<br><b>Rekomendasi:</b> Periksa format Excel."
     if "Efektivitas" in ratio_name:
-        if val >= 100: return "<b>Kondisi:</b> Sangat Baik.<br><b>Penyebab:</b> Kinerja pemungutan optimal.<br><b>Dampak:</b> Kapasitas fiskal meningkat.<br><b>Rekomendasi:</b> Pertahankan, eksplorasi PAD baru."
-        elif val >= 90: return "<b>Kondisi:</b> Baik.<br><b>Penyebab:</b> Pemungutan sesuai rencana.<br><b>Dampak:</b> Keuangan stabil.<br><b>Rekomendasi:</b> Tingkatkan pengawasan."
-        else: return "<b>Kondisi:</b> Kurang.<br><b>Penyebab:</b> Target terlalu tinggi / ekonomi lesu.<br><b>Dampak:</b> Defisit, pembangunan terhambat.<br><b>Rekomendasi:</b> Intensifikasi & Ekstensifikasi pajak."
+        if val >= 100:
+            return "<b>Kondisi:</b> Sangat Baik.<br><b>Penyebab:</b> Kinerja pemungutan optimal.<br><b>Dampak:</b> Kapasitas fiskal meningkat.<br><b>Rekomendasi:</b> Pertahankan, eksplorasi PAD baru."
+        elif val >= 90:
+            return "<b>Kondisi:</b> Baik.<br><b>Penyebab:</b> Pemungutan sesuai rencana.<br><b>Dampak:</b> Keuangan stabil.<br><b>Rekomendasi:</b> Tingkatkan pengawasan."
+        else:
+            return "<b>Kondisi:</b> Kurang.<br><b>Penyebab:</b> Target terlalu tinggi / ekonomi lesu.<br><b>Dampak:</b> Defisit, pembangunan terhambat.<br><b>Rekomendasi:</b> Intensifikasi & Ekstensifikasi pajak."
     elif "Efisiensi" in ratio_name:
-        if val > 100: return "<b>Kondisi:</b> Kurang Efisien (Overbudget).<br><b>Penyebab:</b> Pengeluaran tak terduga/inflasi.<br><b>Dampak:</b> Defisit, temuan audit.<br><b>Rekomendasi:</b> Evaluasi anggaran, revisi DPA."
-        elif val >= 90: return "<b>Kondisi:</b> Sangat Efisien.<br><b>Penyebab:</b> Eksekusi sesuai jadwal.<br><b>Dampak:</b> Program tercapai.<br><b>Rekomendasi:</b> Pastikan kualitas hasil (Value for Money)."
-        else: return "<b>Kondisi:</b> Penyerapan Rendah.<br><b>Penyebab:</b> Keterlambatan tender/kendala teknis.<br><b>Dampak:</b> Target tertunda, idle money.<br><b>Rekomendasi:</b> Percepat tender, monev berkala."
+        if val > 100:
+            return "<b>Kondisi:</b> Kurang Efisien (Overbudget).<br><b>Penyebab:</b> Pengeluaran tak terduga/inflasi.<br><b>Dampak:</b> Defisit, temuan audit.<br><b>Rekomendasi:</b> Evaluasi anggaran, revisi DPA."
+        elif val >= 90:
+            return "<b>Kondisi:</b> Sangat Efisien.<br><b>Penyebab:</b> Eksekusi sesuai jadwal.<br><b>Dampak:</b> Program tercapai.<br><b>Rekomendasi:</b> Pastikan kualitas hasil (Value for Money)."
+        else:
+            return "<b>Kondisi:</b> Penyerapan Rendah.<br><b>Penyebab:</b> Keterlambatan tender/kendala teknis.<br><b>Dampak:</b> Target tertunda, idle money.<br><b>Rekomendasi:</b> Percepat tender, monev berkala."
     elif "Kemandirian" in ratio_name:
-        if val >= 50: return "<b>Kondisi:</b> Mandiri.<br><b>Penyebab:</b> Basis pajak kuat.<br><b>Dampak:</b> Fleksibilitas fiskal tinggi.<br><b>Rekomendasi:</b> Kembangkan BUMD."
-        elif val >= 25: return "<b>Kondisi:</b> Sedang.<br><b>Penyebab:</b> Sektor unggulan belum maksimal.<br><b>Dampak:</b> Rentan kebijakan pusat.<br><b>Rekomendasi:</b> Gali potensi pariwisata/parkir."
-        else: return "<b>Kondisi:</b> Rendah.<br><b>Penyebab:</b> Pajak/retribusi kecil.<br><b>Dampak:</b> Ketergantungan transfer pusat.<br><b>Rekomendasi:</b> Reformasi perpajakan daerah."
+        if val >= 50:
+            return "<b>Kondisi:</b> Mandiri.<br><b>Penyebab:</b> Basis pajak kuat.<br><b>Dampak:</b> Fleksibilitas fiskal tinggi.<br><b>Rekomendasi:</b> Kembangkan BUMD."
+        elif val >= 25:
+            return "<b>Kondisi:</b> Sedang.<br><b>Penyebab:</b> Sektor unggulan belum maksimal.<br><b>Dampak:</b> Rentan kebijakan pusat.<br><b>Rekomendasi:</b> Gali potensi pariwisata/parkir."
+        else:
+            return "<b>Kondisi:</b> Rendah.<br><b>Penyebab:</b> Pajak/retribusi kecil.<br><b>Dampak:</b> Ketergantungan transfer pusat.<br><b>Rekomendasi:</b> Reformasi perpajakan daerah."
     elif "Current Ratio" in ratio_name:
-        if val >= 1.5: return "<b>Kondisi:</b> Likuiditas Sehat.<br><b>Penyebab:</b> Manajemen modal kerja baik.<br><b>Dampak:</b> Kredibilitas tinggi.<br><b>Rekomendasi:</b> Gunakan kas berlebih untuk investasi produktif."
-        else: return "<b>Kondisi:</b> Risiko Likuiditas.<br><b>Penyebab:</b> Kas menipis, piutang macet.<br><b>Dampak:</b> Risiko gagal bayar.<br><b>Rekomendasi:</b> Percepat penagihan piutang, negosiasi ulang utang."
+        if val >= 1.5:
+            return "<b>Kondisi:</b> Likuiditas Sehat.<br><b>Penyebab:</b> Manajemen modal kerja baik.<br><b>Dampak:</b> Kredibilitas tinggi.<br><b>Rekomendasi:</b> Gunakan kas berlebih untuk investasi produktif."
+        else:
+            return "<b>Kondisi:</b> Risiko Likuiditas.<br><b>Penyebab:</b> Kas menipis, piutang macet.<br><b>Dampak:</b> Risiko gagal bayar.<br><b>Rekomendasi:</b> Percepat penagihan piutang, negosiasi ulang utang."
     elif "Debt to Equity" in ratio_name:
-        if val > 2.0: return "<b>Kondisi:</b> High Leverage.<br><b>Penyebab:</b> Agresif pakai utang.<br><b>Dampak:</b> Beban bunga tinggi.<br><b>Rekomendasi:</b> Kurangi utang, cari pendanaan ekuitas."
-        else: return "<b>Kondisi:</b> Struktur Modal Sehat.<br><b>Penyebab:</b> Utang & ekuitas seimbang.<br><b>Dampak:</b> Risiko finansial rendah.<br><b>Rekomendasi:</b> Aman untuk ekspansi."
+        if val > 2.0:
+            return "<b>Kondisi:</b> High Leverage.<br><b>Penyebab:</b> Agresif pakai utang.<br><b>Dampak:</b> Beban bunga tinggi.<br><b>Rekomendasi:</b> Kurangi utang, cari pendanaan ekuitas."
+        else:
+            return "<b>Kondisi:</b> Struktur Modal Sehat.<br><b>Penyebab:</b> Utang & ekuitas seimbang.<br><b>Dampak:</b> Risiko finansial rendah.<br><b>Rekomendasi:</b> Aman untuk ekspansi."
     return "<b>Analisis:</b> Detail belum tersedia."
+
 
 # ============================================================
 # EXPORT FUNCTIONS (PDF & EXCEL)
 # ============================================================
 def generate_excel(flagged_data_dict, findings_list):
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df_findings = pd.DataFrame(findings_list)
         if not df_findings.empty:
             df_findings.columns = ["Modul", "Tingkat Risiko", "Judul", "Detail", "Rekomendasi"]
             df_findings.to_excel(writer, sheet_name="Ringkasan Temuan", index=False)
         for modul, df_flag in flagged_data_dict.items():
-            if not df_flag.empty: df_flag.to_excel(writer, sheet_name=modul[:31], index=False)
+            if not df_flag.empty:
+                df_flag.to_excel(writer, sheet_name=modul[:31], index=False)
     buffer.seek(0)
     return buffer
+
 
 def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(name='Title', parent=styles['Heading1'], textColor=colors.HexColor('#7A1F3D'), alignment=1)
-    heading_style = ParagraphStyle(name='Heading', parent=styles['Heading2'], textColor=colors.HexColor('#FF5C8B'))
-    normal_style = styles['Normal']
+    title_style = ParagraphStyle(name="Title", parent=styles["Heading1"], textColor=colors.HexColor("#8C3B56"), alignment=1)
+    heading_style = ParagraphStyle(name="Heading", parent=styles["Heading2"], textColor=colors.HexColor("#F5B7C8"))
+    normal_style = styles["Normal"]
     elements.append(Paragraph("KERTAS KERJA AUDIT (KKA)", title_style))
     elements.append(Paragraph("FINORA Financial Intelligence System", normal_style))
     elements.append(Spacer(1, 10))
-    header_data = [["Nama Entitas", f": {entitas if entitas else '-'}"], ["Periode Audit", f": {periode if periode else '-'}"], ["Nama File", f": {filename}"], ["Tanggal Pemeriksaan", f": {datetime.now().strftime('%d %B %Y')}"], ["Skor Risiko", f": {score}/100"]]
+    header_data = [
+        ["Nama Entitas", f": {entitas if entitas else '-'}"],
+        ["Periode Audit", f": {periode if periode else '-'}"],
+        ["Nama File", f": {filename}"],
+        ["Tanggal Pemeriksaan", f": {datetime.now().strftime('%d %B %Y')}"],
+        ["Skor Risiko", f": {score}/100"]
+    ]
     t_header = Table(header_data, colWidths=[120, 350])
-    t_header.setStyle(TableStyle([('FONTNAME', (0, 0), (-1, -1), 'Helvetica'), ('FONTSIZE', (0, 0), (-1, -1), 10), ('BOTTOMPADDING', (0, 0), (-1, -1), 6)]))
+    t_header.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
+    ]))
     elements.append(t_header)
     elements.append(Spacer(1, 20))
     elements.append(Paragraph("A. Ringkasan Temuan", heading_style))
     elements.append(Spacer(1, 10))
     summary_data = [["No", "Kode", "Kategori Uji", "Risiko", "Deskripsi Singkat"]]
     for idx, f in enumerate(findings_list, 1):
-        summary_data.append([str(idx), f"F-{idx:02d}", f['module'], f['risk_level'], f['title']])
+        summary_data.append([str(idx), f"F-{idx:02d}", f["module"], f["risk_level"], f["title"]])
     t_summary = Table(summary_data, colWidths=[30, 50, 100, 60, 230])
-    t_summary.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF5C8B')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 9), ('GRID', (0, 0), (-1, -1), 1, colors.grey)]))
+    t_summary.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5B7C8")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 1, colors.grey)
+    ]))
     elements.append(t_summary)
     elements.append(Spacer(1, 20))
     elements.append(Paragraph("B. Rincian Temuan & Bukti", heading_style))
@@ -834,7 +1105,7 @@ def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data)
         elements.append(Paragraph(f"<b>1. Kondisi:</b> {f['detail']}", normal_style))
         elements.append(Paragraph(f"<b>2. Rekomendasi:</b> {f['recommendation']}", normal_style))
         df_flag = pd.DataFrame()
-        key = MODULE_TO_KEY.get(f['module'])
+        key = MODULE_TO_KEY.get(f["module"])
         if key and key in flagged_data and not flagged_data[key].empty:
             df_flag = flagged_data[key]
         if not df_flag.empty:
@@ -844,33 +1115,55 @@ def generate_pdf(entitas, periode, filename, score, findings_list, flagged_data)
             raw_data = [preview_df.columns.tolist()] + preview_df.values.tolist()
             raw_data = [[str(cell) for cell in row] for row in raw_data]
             t_raw = Table(raw_data)
-            t_raw.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('FONTSIZE', (0, 0), (-1, -1), 8)]))
+            t_raw.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 8)
+            ]))
             elements.append(t_raw)
         elements.append(Spacer(1, 20))
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
+
 def generate_fin_excel(nilai, rasio, entity_type):
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        data_nilai = []
-        if "Pemerintahan" in entity_type: data_nilai = [{"Komponen": "Realisasi Pendapatan", "Nilai": nilai.get("real_pendapatan", 0)}, {"Komponen": "Anggaran Pendapatan", "Nilai": nilai.get("ang_pendapatan", 0)}, {"Komponen": "Realisasi Belanja", "Nilai": nilai.get("real_belanja", 0)}, {"Komponen": "Anggaran Belanja", "Nilai": nilai.get("ang_belanja", 0)}, {"Komponen": "Surplus / Defisit", "Nilai": nilai.get("surplus", 0)}, {"Komponen": "Pendapatan Asli Daerah (PAD)", "Nilai": nilai.get("pad", 0)}]
-        else: data_nilai = [{"Komponen": "Total Pendapatan", "Nilai": nilai.get("pendapatan", 0)}, {"Komponen": "Laba Bersih", "Nilai": nilai.get("laba", 0)}, {"Komponen": "Total Aset", "Nilai": nilai.get("total_aset", 0)}, {"Komponen": "Total Liabilitas", "Nilai": nilai.get("total_liabilitas", 0)}, {"Komponen": "Total Ekuitas", "Nilai": nilai.get("ekuitas", 0)}, {"Komponen": "Aset Lancar", "Nilai": nilai.get("aset_lancar", 0)}, {"Komponen": "Liabilitas Jangka Pendek", "Nilai": nilai.get("liabilitas_lancar", 0)}]
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        if "Pemerintahan" in entity_type:
+            data_nilai = [
+                {"Komponen": "Realisasi Pendapatan", "Nilai": nilai.get("real_pendapatan", 0)},
+                {"Komponen": "Anggaran Pendapatan", "Nilai": nilai.get("ang_pendapatan", 0)},
+                {"Komponen": "Realisasi Belanja", "Nilai": nilai.get("real_belanja", 0)},
+                {"Komponen": "Anggaran Belanja", "Nilai": nilai.get("ang_belanja", 0)},
+                {"Komponen": "Surplus / Defisit", "Nilai": nilai.get("surplus", 0)},
+                {"Komponen": "Pendapatan Asli Daerah (PAD)", "Nilai": nilai.get("pad", 0)}
+            ]
+        else:
+            data_nilai = [
+                {"Komponen": "Total Pendapatan", "Nilai": nilai.get("pendapatan", 0)},
+                {"Komponen": "Laba Bersih", "Nilai": nilai.get("laba", 0)},
+                {"Komponen": "Total Aset", "Nilai": nilai.get("total_aset", 0)},
+                {"Komponen": "Total Liabilitas", "Nilai": nilai.get("total_liabilitas", 0)},
+                {"Komponen": "Total Ekuitas", "Nilai": nilai.get("ekuitas", 0)},
+                {"Komponen": "Aset Lancar", "Nilai": nilai.get("aset_lancar", 0)},
+                {"Komponen": "Liabilitas Jangka Pendek", "Nilai": nilai.get("liabilitas_lancar", 0)}
+            ]
         pd.DataFrame(data_nilai).to_excel(writer, sheet_name="Data Keuangan", index=False)
         data_rasio = [{"Rasio": k, "Nilai (%)": v} for k, v in rasio.items()]
         pd.DataFrame(data_rasio).to_excel(writer, sheet_name="Rasio Keuangan", index=False)
     buffer.seek(0)
     return buffer
 
+
 def generate_fin_pdf(nilai, rasio, entity_type):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(name='Title', parent=styles['Heading1'], textColor=colors.HexColor('#7A1F3D'), alignment=1)
-    heading_style = ParagraphStyle(name='Heading', parent=styles['Heading2'], textColor=colors.HexColor('#FF5C8B'))
-    normal_style = styles['Normal']
+    title_style = ParagraphStyle(name="Title", parent=styles["Heading1"], textColor=colors.HexColor("#8C3B56"), alignment=1)
+    heading_style = ParagraphStyle(name="Heading", parent=styles["Heading2"], textColor=colors.HexColor("#F5B7C8"))
+    normal_style = styles["Normal"]
     elements.append(Paragraph("LAPORAN ANALISIS KEUANGAN", title_style))
     elements.append(Paragraph(f"FINORA Financial Intelligence System - {entity_type}", normal_style))
     elements.append(Paragraph(f"Tanggal Analisis: {datetime.now().strftime('%d %B %Y')}", normal_style))
@@ -878,18 +1171,49 @@ def generate_fin_pdf(nilai, rasio, entity_type):
     elements.append(Paragraph("A. Ringkasan Data Keuangan", heading_style))
     elements.append(Spacer(1, 10))
     header_data = [["Komponen", "Nilai (Rp)"]]
-    if "Pemerintahan" in entity_type: header_data.extend([["Realisasi Pendapatan", f"{nilai.get('real_pendapatan', 0):,.0f}"], ["Anggaran Pendapatan", f"{nilai.get('ang_pendapatan', 0):,.0f}"], ["Realisasi Belanja", f"{nilai.get('real_belanja', 0):,.0f}"], ["Anggaran Belanja", f"{nilai.get('ang_belanja', 0):,.0f}"], ["Surplus / Defisit", f"{nilai.get('surplus', 0):,.0f}"], ["Pendapatan Asli Daerah (PAD)", f"{nilai.get('pad', 0):,.0f}"]])
-    else: header_data.extend([["Total Pendapatan", f"{nilai.get('pendapatan', 0):,.0f}"], ["Laba Bersih", f"{nilai.get('laba', 0):,.0f}"], ["Total Aset", f"{nilai.get('total_aset', 0):,.0f}"], ["Total Liabilitas", f"{nilai.get('total_liabilitas', 0):,.0f}"], ["Total Ekuitas", f"{nilai.get('ekuitas', 0):,.0f}"]])
+    if "Pemerintahan" in entity_type:
+        header_data.extend([
+            ["Realisasi Pendapatan", f"{nilai.get('real_pendapatan', 0):,.0f}"],
+            ["Anggaran Pendapatan", f"{nilai.get('ang_pendapatan', 0):,.0f}"],
+            ["Realisasi Belanja", f"{nilai.get('real_belanja', 0):,.0f}"],
+            ["Anggaran Belanja", f"{nilai.get('ang_belanja', 0):,.0f}"],
+            ["Surplus / Defisit", f"{nilai.get('surplus', 0):,.0f}"],
+            ["Pendapatan Asli Daerah (PAD)", f"{nilai.get('pad', 0):,.0f}"]
+        ])
+    else:
+        header_data.extend([
+            ["Total Pendapatan", f"{nilai.get('pendapatan', 0):,.0f}"],
+            ["Laba Bersih", f"{nilai.get('laba', 0):,.0f}"],
+            ["Total Aset", f"{nilai.get('total_aset', 0):,.0f}"],
+            ["Total Liabilitas", f"{nilai.get('total_liabilitas', 0):,.0f}"],
+            ["Total Ekuitas", f"{nilai.get('ekuitas', 0):,.0f}"]
+        ])
     t_data = Table(header_data, colWidths=[250, 200])
-    t_data.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF5C8B')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'), ('FONTSIZE', (0, 0), (-1, -1), 10), ('GRID', (0, 0), (-1, -1), 1, colors.grey), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('ALIGN', (1, 0), (1, -1), 'RIGHT')]))
+    t_data.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5B7C8")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 1, colors.grey),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT")
+    ]))
     elements.append(t_data)
     elements.append(Spacer(1, 20))
     elements.append(Paragraph("B. Rasio Keuangan", heading_style))
     elements.append(Spacer(1, 10))
     rasio_data = [["Rasio", "Nilai"]]
-    for k, v in rasio.items(): rasio_data.append([k, f"{v}"])
+    for k, v in rasio.items():
+        rasio_data.append([k, f"{v}"])
     t_rasio = Table(rasio_data, colWidths=[300, 150])
-    t_rasio.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey), ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 10), ('GRID', (0, 0), (-1, -1), 1, colors.grey), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('ALIGN', (1, 0), (1, -1), 'RIGHT')]))
+    t_rasio.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 1, colors.grey),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT")
+    ]))
     elements.append(t_rasio)
     elements.append(Spacer(1, 20))
     elements.append(Paragraph("C. Analisis & Rekomendasi Mendalam", heading_style))
@@ -903,22 +1227,165 @@ def generate_fin_pdf(nilai, rasio, entity_type):
     buffer.seek(0)
     return buffer
 
+
 # ============================================================
 # UI COMPONENTS & HALAMAN
 # ============================================================
+def inject_scroll_reveal(duration_ms: int = 600, distance_px: int = 18, threshold: float = 0.08):
+    _components.html(
+        f"""
+        <script>
+          (function () {{
+            const parentDoc = window.parent ? window.parent.document : document;
+            const thresholdVal = {threshold};
+            const distPx = {distance_px};
+            const durMs = {duration_ms};
+
+            const styleEl = parentDoc.getElementById("finora-scroll-reveal-style");
+            if (!styleEl) {{
+              const s = parentDoc.createElement("style");
+              s.id = "finora-scroll-reveal-style";
+              s.textContent = `
+                .finora-sr {{
+                  opacity: 0;
+                  transform: translateY(${{distPx}}px);
+                  transition: opacity ${{durMs}}ms cubic-bezier(0.22, 1, 0.36, 1),
+                              transform ${{durMs}}ms cubic-bezier(0.22, 1, 0.36, 1);
+                  will-change: opacity, transform;
+                }}
+                .finora-sr.is-visible {{
+                  opacity: 1 !important;
+                  transform: translateY(0) !important;
+                }}
+                @media (prefers-reduced-motion: reduce) {{
+                  .finora-sr {{
+                    opacity: 1 !important;
+                    transform: none !important;
+                    transition: none !important;
+                  }}
+                }}
+              `;
+              parentDoc.head.appendChild(s);
+            }}
+
+            const targetSelectors = [
+              ".finora-header",
+              ".metric-card",
+              ".insight-box",
+              ".ratio-card",
+              ".ratio-card-muted",
+              ".finora-hero-card",
+              ".finora-cap-card",
+              ".finora-panel-box",
+              ".finora-cta-box",
+              "[data-testid='stExpander']",
+              "[data-testid='stDataFrame']",
+              "[data-testid='stTable']",
+              ".stPlotlyChart"
+            ];
+
+            function markVisible(el) {{
+              el.classList.add("is-visible");
+            }}
+
+            function revealInViewOrAbove() {{
+              const viewH = (window.parent ? window.parent.innerHeight : window.innerHeight) || 900;
+              parentDoc.querySelectorAll(".finora-sr:not(.is-visible)").forEach((el) => {{
+                const rect = el.getBoundingClientRect();
+                if (rect.top < viewH * 0.96) {{
+                  markVisible(el);
+                }}
+              }});
+            }}
+
+            let observer = null;
+            if ("IntersectionObserver" in window) {{
+              observer = new IntersectionObserver(
+                (entries, obs) => {{
+                  entries.forEach((entry) => {{
+                    if (entry.isIntersecting) {{
+                      markVisible(entry.target);
+                      obs.unobserve(entry.target);
+                    }}
+                  }});
+                }},
+                {{
+                  threshold: thresholdVal,
+                  rootMargin: "0px 0px -20px 0px"
+                }}
+              );
+            }}
+
+            function attachTargets() {{
+              const nodes = parentDoc.querySelectorAll(targetSelectors.join(","));
+              nodes.forEach((el) => {{
+                if (!el.classList.contains("finora-sr")) {{
+                  el.classList.add("finora-sr");
+                }}
+                if (!el.classList.contains("is-visible")) {{
+                  if (observer) {{
+                    observer.observe(el);
+                  }} else {{
+                    markVisible(el);
+                  }}
+                }}
+              }});
+              revealInViewOrAbove();
+            }}
+
+            attachTargets();
+            setTimeout(revealInViewOrAbove, 180);
+            setTimeout(revealInViewOrAbove, 600);
+
+            const scrollTarget = window.parent || window;
+            scrollTarget.addEventListener("scroll", revealInViewOrAbove, {{ passive: true }});
+
+            const mutObs = new MutationObserver(() => {{
+              attachTargets();
+            }});
+            if (parentDoc.body) {{
+              mutObs.observe(parentDoc.body, {{ childList: true, subtree: true }});
+            }}
+          }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def finora_header(title, subtitle):
-    logo_html = f'<img src="data:image/png;base64,{LOGO_B64}" style="height: 40px; vertical-align: middle; margin-right: 12px; margin-top: -5px; border-radius: 8px;">' if LOGO_B64 else ''
+    logo_html = f'<img src="data:image/png;base64,{LOGO_B64}" style="height: 40px; vertical-align: middle; margin-right: 12px; margin-top: -5px; border-radius: 8px;">' if LOGO_B64 else ""
     st.markdown(f'<div class="finora-header"><h1>{logo_html} {title}</h1><p>{subtitle}</p></div>', unsafe_allow_html=True)
+    inject_scroll_reveal()
+
 
 def render_audit_results(all_findings, flagged_data, filename, entitas, periode, score):
     color = "#C62828" if score > 50 else "#EF6C00" if score > 20 else "#2E7D32"
-    st.markdown(f"""<div style="background-color: white; padding: 20px; border-radius: 10px; border: 2px solid #FF5C8B; margin-bottom: 20px;"><h2 style="color: #7A1F3D; text-align: center; margin-bottom: 5px;">KERTAS KERJA AUDIT (KKA)</h2><p style="text-align: center; color: gray; margin-top: 0;">FINORA Financial Intelligence System</p><hr><table style="width: 100%; font-size: 14px;"><tr><td><b>Nama Entitas</b></td><td>: {entitas if entitas else '-'}</td></tr><tr><td><b>Periode Audit</b></td><td>: {periode if periode else '-'}</td></tr><tr><td><b>Nama File</b></td><td>: {filename}</td></tr><tr><td><b>Tanggal Pemeriksaan</b></td><td>: {datetime.now().strftime('%d %B %Y')}</td></tr><tr><td><b>Skor Risiko</b></td><td>: <span style='color:{color}; font-weight:bold; font-size:18px;'>{score}/100</span></td></tr></table></div>""", unsafe_allow_html=True)
+    st.markdown(
+        f"""<div style="background-color: white; padding: 20px; border-radius: 10px; border: 2px solid #F5B7C8; margin-bottom: 20px;">
+        <h2 style="color: #8C3B56; text-align: center; margin-bottom: 5px;">KERTAS KERJA AUDIT (KKA)</h2>
+        <p style="text-align: center; color: gray; margin-top: 0;">FINORA Financial Intelligence System</p><hr>
+        <table style="width: 100%; font-size: 14px;">
+        <tr><td><b>Nama Entitas</b></td><td>: {entitas if entitas else '-'}</td></tr>
+        <tr><td><b>Periode Audit</b></td><td>: {periode if periode else '-'}</td></tr>
+        <tr><td><b>Nama File</b></td><td>: {filename}</td></tr>
+        <tr><td><b>Tanggal Pemeriksaan</b></td><td>: {datetime.now().strftime('%d %B %Y')}</td></tr>
+        <tr><td><b>Skor Risiko</b></td><td>: <span style='color:{color}; font-weight:bold; font-size:18px;'>{score}/100</span></td></tr>
+        </table></div>""",
+        unsafe_allow_html=True
+    )
     tab_kka, tab_grafik, tab_ai = st.tabs(["📝 Laporan Temuan & Bukti", "📊 Visualisasi Grafik", "🤖 Tanya FINORA AI"])
     with tab_kka:
         st.markdown("### A. Ringkasan Temuan")
-        summary_data = [{"No": idx, "Kode": f"F-{idx:02d}", "Kategori Uji": f["module"], "Risiko": f["risk_level"], "Deskripsi": f["title"]} for idx, f in enumerate(all_findings, 1)]
-        if summary_data: st.table(pd.DataFrame(summary_data))
-        else: st.info("Tidak ada temuan.")
+        summary_data = [
+            {"No": idx, "Kode": f"F-{idx:02d}", "Kategori Uji": f["module"], "Risiko": f["risk_level"], "Deskripsi": f["title"]}
+            for idx, f in enumerate(all_findings, 1)
+        ]
+        if summary_data:
+            st.table(pd.DataFrame(summary_data))
+        else:
+            st.info("Tidak ada temuan.")
         st.markdown("---")
         st.markdown("### B. Rincian Temuan")
         for idx, f in enumerate(all_findings, 1):
@@ -931,31 +1398,48 @@ def render_audit_results(all_findings, flagged_data, filename, entitas, periode,
                     st.markdown("**3. Sebab**\nKelemahan kontrol internal / human error.")
                     st.markdown("**4. Akibat**\nBerpotensi kerugian finansial / laporan tidak wajar.")
                 st.error(f"**5. Rekomendasi:** {f['recommendation']}")
-                key = MODULE_TO_KEY.get(f['module'])
+                key = MODULE_TO_KEY.get(f["module"])
                 if key and key in flagged_data and not flagged_data[key].empty:
                     st.dataframe(flagged_data[key].head(10), use_container_width=True)
         st.markdown("---")
         st.warning(f"Ditemukan **{len(all_findings)} indikasi masalah**. Data memerlukan verifikasi lebih lanjut.")
         st.markdown("### 📥 Download Kertas Kerja Audit")
         col1, col2 = st.columns(2)
-        col1.download_button("⬇️ Download Excel", data=generate_excel(flagged_data, all_findings), file_name=f"KKA_{entitas}.xlsx", use_container_width=True)
-        col2.download_button("⬇️ Download PDF", data=generate_pdf(entitas, periode, filename, score, all_findings, flagged_data), file_name=f"KKA_{entitas}.pdf", use_container_width=True)
+        col1.download_button(
+            "⬇️ Download Excel",
+            data=generate_excel(flagged_data, all_findings),
+            file_name=f"KKA_{entitas}.xlsx",
+            use_container_width=True
+        )
+        col2.download_button(
+            "⬇️ Download PDF",
+            data=generate_pdf(entitas, periode, filename, score, all_findings, flagged_data),
+            file_name=f"KKA_{entitas}.pdf",
+            use_container_width=True
+        )
     with tab_grafik:
         if all_findings:
             c1, c2 = st.columns(2)
             with c1:
                 risk_df = pd.DataFrame(all_findings)["risk_level"].value_counts().reset_index()
-                st.plotly_chart(px.pie(risk_df, names="risk_level", values="count", color="risk_level", color_discrete_map={"Tinggi": "#C62828", "Sedang": "#EF6C00", "Rendah": "#2E7D32"}, hole=0.4), use_container_width=True)
+                st.plotly_chart(
+                    px.pie(risk_df, names="risk_level", values="count", color="risk_level",
+                           color_discrete_map={"Tinggi": "#C62828", "Sedang": "#EF6C00", "Rendah": "#2E7D32"}, hole=0.4),
+                    use_container_width=True
+                )
             with c2:
                 mod_df = pd.DataFrame(all_findings)["module"].value_counts().reset_index()
-                st.plotly_chart(px.bar(mod_df, x="count", y="module", orientation='h', color_discrete_sequence=["#FF5C8B"]), use_container_width=True)
-        else: st.info("Belum ada data.")
+                st.plotly_chart(
+                    px.bar(mod_df, x="count", y="module", orientation="h", color_discrete_sequence=["#F5B7C8"]),
+                    use_container_width=True
+                )
+        else:
+            st.info("Belum ada data.")
     with tab_ai:
-        temuan_detail_lines = []
-        for idx_f, f in enumerate(all_findings, 1):
-            temuan_detail_lines.append(
-                f"- F-{idx_f:02d} [{f['risk_level']}] {f['module']}: {f['title']} | Detail: {f['detail']} | Rekomendasi: {f['recommendation']}"
-            )
+        temuan_detail_lines = [
+            f"- F-{idx_f:02d} [{f['risk_level']}] {f['module']}: {f['title']} | Detail: {f['detail']} | Rekomendasi: {f['recommendation']}"
+            for idx_f, f in enumerate(all_findings, 1)
+        ]
         context_text = (
             f"Entitas: {entitas if entitas else '-'} | Periode: {periode if periode else '-'} | File: {filename}\n"
             f"Skor Risiko Audit: {score}/100 | Total Temuan: {len(all_findings)}\n"
@@ -983,6 +1467,7 @@ def render_audit_results(all_findings, flagged_data, filename, entitas, periode,
             panel_title="🤖 AI Audit Insights & Tanya Jawab Terarah"
         )
 
+
 def page_audit():
     finora_header("Audit Profesional", "Sistem deteksi otomatis anomali transaksi")
     with st.container():
@@ -1002,11 +1487,11 @@ def page_audit():
         with st.expander("⚙️ Koreksi Pemetaan Kolom (Klik Jika Perlu)", expanded=False):
             c1, c2 = st.columns(2)
             date_col = c1.selectbox("Kolom Tanggal", list(df.columns), index=list(df.columns).index(detected["date"]) if detected["date"] in list(df.columns) else 0)
-            desc_col = c2.selectbox("Kolom Deskripsi", [""] + list(df.columns), index=list(df.columns).index(detected["desc"])+1 if detected["desc"] in list(df.columns) else 0)
+            desc_col = c2.selectbox("Kolom Deskripsi", [""] + list(df.columns), index=list(df.columns).index(detected["desc"]) + 1 if detected["desc"] in list(df.columns) else 0)
             c3, c4, c5 = st.columns(3)
             amount_col = c3.selectbox("Kolom Nominal", list(df.columns), index=list(df.columns).index(detected["amount"]) if detected["amount"] in list(df.columns) else 0)
-            budget_col = c4.selectbox("Kolom Anggaran", [""] + list(df.columns), index=list(df.columns).index(detected["budget"])+1 if detected["budget"] in list(df.columns) else 0)
-            invoice_col = c5.selectbox("Kolom No. Faktur", [""] + list(df.columns), index=list(df.columns).index(detected["invoice"])+1 if detected["invoice"] in list(df.columns) else 0)
+            budget_col = c4.selectbox("Kolom Anggaran", [""] + list(df.columns), index=list(df.columns).index(detected["budget"]) + 1 if detected["budget"] in list(df.columns) else 0)
+            invoice_col = c5.selectbox("Kolom No. Faktur", [""] + list(df.columns), index=list(df.columns).index(detected["invoice"]) + 1 if detected["invoice"] in list(df.columns) else 0)
         st.markdown("### 3. Informasi KKA")
         c_kka1, c_kka2 = st.columns(2)
         entitas = c_kka1.text_input("Nama Entitas / Perusahaan", placeholder="Contoh: PT Maju Jaya", key="audit_entitas")
@@ -1014,31 +1499,68 @@ def page_audit():
         st.markdown("### 4. Jalankan Prosedur")
         if st.button("🚀 JALANKAN PROSEDUR AUDIT", use_container_width=True):
             with st.spinner("Memproses data..."):
-                if amount_col: df[amount_col] = df[amount_col].apply(clean_currency)
-                if budget_col: df[budget_col] = df[budget_col].apply(clean_currency)
-                if invoice_col: df[invoice_col] = df[invoice_col].astype(str)
-                
-                all_findings, flagged_data = [], {}
-                f, flag = audit_empty(df, [c for c in [date_col, amount_col, desc_col] if c]); all_findings.extend(f); flagged_data["Kelengkapan Kosong"] = flag
-                f, flag = audit_duplicates(df, [c for c in [date_col, amount_col, desc_col, invoice_col] if c]); all_findings.extend(f); flagged_data["Duplikasi Ekstrem"] = flag
-                if date_col: f, flag = audit_weekend(df, date_col); all_findings.extend(f); flagged_data["Transaksi Weekend"] = flag
-                if desc_col: f, flag = audit_suspicious_words(df, desc_col); all_findings.extend(f); flagged_data["Kata Kunci"] = flag
                 if amount_col:
-                    f, flag = audit_negative(df, amount_col); all_findings.extend(f); flagged_data["Nilai Negatif"] = flag
-                    f, flag = audit_outliers_iqr(df, amount_col); all_findings.extend(f); flagged_data["Outlier IQR"] = flag
-                if budget_col and amount_col: f, flag = audit_overbudget(df, budget_col, amount_col); all_findings.extend(f); flagged_data["Overbudget"] = flag
-                score = min(100, (sum(1 for f in all_findings if f["risk_level"] == "Tinggi") * 20) + (sum(1 for f in all_findings if f["risk_level"] == "Sedang") * 10))
-                st.session_state['audit_results'] = {"findings": all_findings, "flagged": flagged_data, "filename": uploaded.name, "entitas": entitas, "periode": periode, "score": score}
+                    df[amount_col] = df[amount_col].apply(clean_currency)
+                if budget_col:
+                    df[budget_col] = df[budget_col].apply(clean_currency)
+                if invoice_col:
+                    df[invoice_col] = df[invoice_col].astype(str)
+
+                all_findings, flagged_data = [], {}
+                f, flag = audit_empty(df, [c for c in [date_col, amount_col, desc_col] if c])
+                all_findings.extend(f)
+                flagged_data["Kelengkapan Kosong"] = flag
+                f, flag = audit_duplicates(df, [c for c in [date_col, amount_col, desc_col, invoice_col] if c])
+                all_findings.extend(f)
+                flagged_data["Duplikasi Ekstrem"] = flag
+                if date_col:
+                    f, flag = audit_weekend(df, date_col)
+                    all_findings.extend(f)
+                    flagged_data["Transaksi Weekend"] = flag
+                if desc_col:
+                    f, flag = audit_suspicious_words(df, desc_col)
+                    all_findings.extend(f)
+                    flagged_data["Kata Kunci"] = flag
+                if amount_col:
+                    f, flag = audit_negative(df, amount_col)
+                    all_findings.extend(f)
+                    flagged_data["Nilai Negatif"] = flag
+                    f, flag = audit_outliers_iqr(df, amount_col)
+                    all_findings.extend(f)
+                    flagged_data["Outlier IQR"] = flag
+                if budget_col and amount_col:
+                    f, flag = audit_overbudget(df, budget_col, amount_col)
+                    all_findings.extend(f)
+                    flagged_data["Overbudget"] = flag
+                score = min(
+                    100,
+                    (sum(1 for f in all_findings if f["risk_level"] == "Tinggi") * 20)
+                    + (sum(1 for f in all_findings if f["risk_level"] == "Sedang") * 10)
+                )
+                st.session_state["audit_results"] = {
+                    "findings": all_findings,
+                    "flagged": flagged_data,
+                    "filename": uploaded.name,
+                    "entitas": entitas,
+                    "periode": periode,
+                    "score": score
+                }
                 st.session_state.ai_chat_history = []
                 flagged_json = {k: v.to_dict(orient="records") for k, v in flagged_data.items() if not v.empty}
                 fid = save_file(uploaded.name, uploaded.getvalue())
-                aid = save_analysis(fid, "Audit Profesional", ["audit_v5"], {"total_findings": len(all_findings), "score": score, "entitas": entitas, "periode": periode, "flagged_data": flagged_json})
+                aid = save_analysis(
+                    fid,
+                    "Audit Profesional",
+                    ["audit_v5"],
+                    {"total_findings": len(all_findings), "score": score, "entitas": entitas, "periode": periode, "flagged_data": flagged_json}
+                )
                 save_findings(aid, all_findings)
                 st.success(f"💾 KKA untuk **{entitas}** berhasil disimpan (ID #{aid}).")
-    if 'audit_results' in st.session_state:
-        res = st.session_state['audit_results']
+    if "audit_results" in st.session_state:
+        res = st.session_state["audit_results"]
         st.markdown("---")
         render_audit_results(res["findings"], res["flagged"], res["filename"], res["entitas"], res["periode"], res["score"])
+
 
 def page_financial_analysis():
     finora_header("Analisis Laporan Keuangan", "Evaluasi Kesehatan Finansial & Prospek")
@@ -1115,26 +1637,34 @@ def page_financial_analysis():
                     prev_col=fin_ang_col
                 )
                 rasio = hitung_rasio_dari_nilai(nilai_utama, entity_type)
-                st.session_state['fin_results'] = {"rasio": rasio, "nilai": nilai_utama, "entity_type": entity_type}
-    if 'fin_results' in st.session_state:
-        res = st.session_state['fin_results']
-        rasio, nilai, is_pemda = res["rasio"], res["nilai"], "Pemerintahan" in res['entity_type']
+                st.session_state["fin_results"] = {"rasio": rasio, "nilai": nilai_utama, "entity_type": entity_type}
+    if "fin_results" in st.session_state:
+        res = st.session_state["fin_results"]
+        rasio, nilai, is_pemda = res["rasio"], res["nilai"], "Pemerintahan" in res["entity_type"]
         st.markdown("---")
         tab_rasio, tab_grafik, tab_ai_advisor = st.tabs(["📊 Ringkasan Rasio", "📈 Visualisasi & Prospek", "🧠 AI Financial Advisor"])
         with tab_rasio:
             st.markdown(f"### Kesehatan Finansial: **{res['entity_type']}**")
             if is_pemda:
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: metric_card("Realisasi Pendapatan", format_rupiah(nilai.get('real_pendapatan', 0)))
-                with c2: metric_card("Realisasi Belanja", format_rupiah(nilai.get('real_belanja', 0)))
-                with c3: metric_card("Surplus / Defisit", format_rupiah(nilai.get('surplus', 0)))
-                with c4: metric_card("Pendapatan Asli Daerah", format_rupiah(nilai.get('pad', 0)))
+                with c1:
+                    metric_card("Realisasi Pendapatan", format_rupiah(nilai.get("real_pendapatan", 0)))
+                with c2:
+                    metric_card("Realisasi Belanja", format_rupiah(nilai.get("real_belanja", 0)))
+                with c3:
+                    metric_card("Surplus / Defisit", format_rupiah(nilai.get("surplus", 0)))
+                with c4:
+                    metric_card("Pendapatan Asli Daerah", format_rupiah(nilai.get("pad", 0)))
                 st.markdown("#### Rasio Keuangan Sektor Publik")
                 r1, r2, r3, r4 = st.columns(4)
-                with r1: metric_card("Efektivitas Pendapatan", f"{rasio.get('Efektivitas Pendapatan (%)', 0)} %")
-                with r2: metric_card("Efisiensi Belanja", f"{rasio.get('Efisiensi Belanja (%)', 0)} %")
-                with r3: metric_card("Kemandirian Daerah", f"{rasio.get('Kemandirian Daerah (%)', 0)} %")
-                with r4: metric_card("Pertumbuhan Pendapatan", f"{rasio.get('Pertumbuhan Pendapatan (%)', 0)} %")
+                with r1:
+                    metric_card("Efektivitas Pendapatan", f"{rasio.get('Efektivitas Pendapatan (%)', 0)} %")
+                with r2:
+                    metric_card("Efisiensi Belanja", f"{rasio.get('Efisiensi Belanja (%)', 0)} %")
+                with r3:
+                    metric_card("Kemandirian Daerah", f"{rasio.get('Kemandirian Daerah (%)', 0)} %")
+                with r4:
+                    metric_card("Pertumbuhan Pendapatan", f"{rasio.get('Pertumbuhan Pendapatan (%)', 0)} %")
                 st.markdown("---")
                 st.markdown("### 📝 Analisis Kondisi & Rekomendasi Mendalam")
                 st.markdown(f"""<div class="insight-box"><h4>1. Efektivitas Pendapatan ({rasio.get('Efektivitas Pendapatan (%)', 0)}%)</h4><p>{get_detailed_insight('Efektivitas', rasio.get('Efektivitas Pendapatan (%)', 0))}</p></div>""", unsafe_allow_html=True)
@@ -1143,17 +1673,26 @@ def page_financial_analysis():
                 st.markdown(f"""<div class="insight-box"><h4>4. Pertumbuhan Pendapatan ({rasio.get('Pertumbuhan Pendapatan (%)', 0)}%)</h4><p>{get_detailed_insight('Pertumbuhan', rasio.get('Pertumbuhan Pendapatan (%)', 0))}</p></div>""", unsafe_allow_html=True)
             else:
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: metric_card("Total Pendapatan", format_rupiah(nilai.get('pendapatan', 0)))
-                with c2: metric_card("Laba Bersih", format_rupiah(nilai.get('laba', 0)))
-                with c3: metric_card("Total Aset", format_rupiah(nilai.get('total_aset', 0)))
-                with c4: metric_card("Total Ekuitas", format_rupiah(nilai.get('ekuitas', 0)))
+                with c1:
+                    metric_card("Total Pendapatan", format_rupiah(nilai.get("pendapatan", 0)))
+                with c2:
+                    metric_card("Laba Bersih", format_rupiah(nilai.get("laba", 0)))
+                with c3:
+                    metric_card("Total Aset", format_rupiah(nilai.get("total_aset", 0)))
+                with c4:
+                    metric_card("Total Ekuitas", format_rupiah(nilai.get("ekuitas", 0)))
                 st.markdown("#### Rasio Keuangan Utama")
                 r1, r2, r3, r4, r5 = st.columns(5)
-                with r1: metric_card("Current Ratio", f"{rasio.get('Current Ratio (x)', 0)} x")
-                with r2: metric_card("Net Profit Margin", f"{rasio.get('Net Profit Margin (%)', 0)} %")
-                with r3: metric_card("ROA", f"{rasio.get('ROA (%)', 0)} %")
-                with r4: metric_card("ROE", f"{rasio.get('ROE (%)', 0)} %")
-                with r5: metric_card("Debt to Equity", f"{rasio.get('Debt to Equity (x)', 0)} x")
+                with r1:
+                    metric_card("Current Ratio", f"{rasio.get('Current Ratio (x)', 0)} x")
+                with r2:
+                    metric_card("Net Profit Margin", f"{rasio.get('Net Profit Margin (%)', 0)} %")
+                with r3:
+                    metric_card("ROA", f"{rasio.get('ROA (%)', 0)} %")
+                with r4:
+                    metric_card("ROE", f"{rasio.get('ROE (%)', 0)} %")
+                with r5:
+                    metric_card("Debt to Equity", f"{rasio.get('Debt to Equity (x)', 0)} x")
                 st.markdown("---")
                 st.markdown("### 📝 Analisis Kondisi & Rekomendasi Mendalam")
                 st.markdown(f"""<div class="insight-box"><h4>1. Likuiditas: Current Ratio ({rasio.get('Current Ratio (x)', 0)}x)</h4><p>{get_detailed_insight('Current Ratio', rasio.get('Current Ratio (x)', 0))}</p></div>""", unsafe_allow_html=True)
@@ -1161,17 +1700,37 @@ def page_financial_analysis():
             st.markdown("---")
             st.markdown("### 📥 Download Laporan Analisis")
             col_ex, col_pdf = st.columns(2)
-            col_ex.download_button(label="⬇️ Download Excel (Data & Rasio)", data=generate_fin_excel(nilai, rasio, res['entity_type']), file_name=f"Analisis_Keuangan_{res['entity_type'].replace(' ', '_')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            col_pdf.download_button(label="⬇️ Download PDF (Laporan Lengkap)", data=generate_fin_pdf(nilai, rasio, res['entity_type']), file_name=f"Laporan_Analisis_{res['entity_type'].replace(' ', '_')}.pdf", mime="application/pdf", use_container_width=True)
+            col_ex.download_button(
+                label="⬇️ Download Excel (Data & Rasio)",
+                data=generate_fin_excel(nilai, rasio, res["entity_type"]),
+                file_name=f"Analisis_Keuangan_{res['entity_type'].replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            col_pdf.download_button(
+                label="⬇️ Download PDF (Laporan Lengkap)",
+                data=generate_fin_pdf(nilai, rasio, res["entity_type"]),
+                file_name=f"Laporan_Analisis_{res['entity_type'].replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
         with tab_grafik:
             st.markdown("### Analisis Visual Prospek")
             if is_pemda:
-                fig = go.Figure(data=[go.Bar(name='Anggaran Pendapatan', x=['Pendapatan'], y=[nilai.get('ang_pendapatan', 0)], marker_color='#F8C8D4'), go.Bar(name='Realisasi Pendapatan', x=['Pendapatan'], y=[nilai.get('real_pendapatan', 0)], marker_color='#FF5C8B'), go.Bar(name='Anggaran Belanja', x=['Belanja'], y=[nilai.get('ang_belanja', 0)], marker_color='#F8C8D4'), go.Bar(name='Realisasi Belanja', x=['Belanja'], y=[nilai.get('real_belanja', 0)], marker_color='#7A1F3D')])
-                fig.update_layout(barmode='group', title="Anggaran vs Realisasi APBD", height=400)
+                fig = go.Figure(data=[
+                    go.Bar(name="Anggaran Pendapatan", x=["Pendapatan"], y=[nilai.get("ang_pendapatan", 0)], marker_color="#F5B7C8"),
+                    go.Bar(name="Realisasi Pendapatan", x=["Pendapatan"], y=[nilai.get("real_pendapatan", 0)], marker_color="#F5B7C8"),
+                    go.Bar(name="Anggaran Belanja", x=["Belanja"], y=[nilai.get("ang_belanja", 0)], marker_color="#F5B7C8"),
+                    go.Bar(name="Realisasi Belanja", x=["Belanja"], y=[nilai.get("real_belanja", 0)], marker_color="#8C3B56")
+                ])
+                fig.update_layout(barmode="group", title="Anggaran vs Realisasi APBD", height=400)
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                fig = go.Figure(data=[go.Bar(name='Pendapatan', x=['Keuangan'], y=[nilai.get('pendapatan', 0)], marker_color='#FF5C8B'), go.Bar(name='Laba Bersih', x=['Keuangan'], y=[nilai.get('laba', 0)], marker_color='#7A1F3D')])
-                fig.update_layout(barmode='group', title="Pendapatan vs Laba Bersih", height=400)
+                fig = go.Figure(data=[
+                    go.Bar(name="Pendapatan", x=["Keuangan"], y=[nilai.get("pendapatan", 0)], marker_color="#F5B7C8"),
+                    go.Bar(name="Laba Bersih", x=["Keuangan"], y=[nilai.get("laba", 0)], marker_color="#8C3B56")
+                ])
+                fig.update_layout(barmode="group", title="Pendapatan vs Laba Bersih", height=400)
                 st.plotly_chart(fig, use_container_width=True)
         with tab_ai_advisor:
             if is_pemda:
@@ -1228,8 +1787,8 @@ def page_financial_analysis():
                 panel_title="🤖 AI Financial Advisor & Tanya Jawab Terarah"
             )
 
+
 def page_cash_flow():
-    """Analisis arus kas berbasis laporan arus kas (PSAK 207) atau transaksi kas."""
     finora_header(
         "Cash Flow Intelligence",
         "Analisis arus kas operasi, investasi, pendanaan, rasio, tren, risiko, dan insight AI"
@@ -1352,26 +1911,6 @@ def page_cash_flow():
         inferred = guess_line_activity(s_clean)
         return current_section, inferred
 
-    def extract_revenue_default(df_data, desc_col_name, period_cols):
-        if desc_col_name not in df_data.columns or not period_cols:
-            return 0.0
-        patterns = [
-            "pendapatan", "penjualan", "revenue", "omzet",
-            "penerimaan kas dari pelanggan", "penerimaan dari pelanggan"
-        ]
-        matched_vals = []
-        for _, r in df_data.iterrows():
-            txt = str(r[desc_col_name]).lower()
-            if any(pat in txt for pat in patterns):
-                for p in period_cols:
-                    if p in df_data.columns:
-                        num = abs(to_number(r[p]))
-                        if num > 0:
-                            matched_vals.append(num)
-        if matched_vals:
-            return float(max(matched_vals))
-        return 0.0
-
     def _normalize_account_text(text):
         s = str(text).lower().strip()
         s = re.sub(r"[^a-z0-9\s]", " ", s)
@@ -1402,7 +1941,6 @@ def page_cash_flow():
         return re.sub(r"\s+", " ", s).strip()
 
     def extract_cf_ratio_inputs(df_data, desc_col_name, period_cols, line_items=None):
-        """Ekstrak otomatis nilai pendukung rasio arus kas dari seluruh baris/akun di file."""
         extracted = {
             "revenue": 0.0,
             "current_liabilities": 0.0,
@@ -1506,7 +2044,6 @@ def page_cash_flow():
                 extracted["sources"][key] = best_label
                 extracted["modes"][key] = "direct"
 
-        # Fallback dari pos arus kas yang terklasifikasi jika akun spesifik belum ditemukan
         if line_items:
             if extracted["revenue"] == 0.0:
                 op_inflows = [
@@ -1588,11 +2125,11 @@ def page_cash_flow():
         doc = SimpleDocTemplate(buff, pagesize=A4, rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
         styles = getSampleStyleSheet()
         title_style = ParagraphStyle(
-            "CFTitle", parent=styles["Title"], textColor=colors.HexColor("#7A1F3D"),
+            "CFTitle", parent=styles["Title"], textColor=colors.HexColor("#8C3B56"),
             alignment=1, fontSize=16, leading=20
         )
         heading_style = ParagraphStyle(
-            "CFHeading", parent=styles["Heading2"], textColor=colors.HexColor("#7A1F3D"),
+            "CFHeading", parent=styles["Heading2"], textColor=colors.HexColor("#8C3B56"),
             fontSize=11, leading=14
         )
         elements = [
@@ -1607,12 +2144,12 @@ def page_cash_flow():
             summary_rows.append([str(key), shown])
         summary_table = Table(summary_rows, colWidths=[230, 260], repeatRows=1)
         summary_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#7A1F3D")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#8C3B56")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
             ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FFF5E8")])
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F6F7D7")])
         ]))
         elements.extend([summary_table, Spacer(1, 14), Paragraph("Rincian Data", heading_style)])
         if detail_df is not None and not detail_df.empty:
@@ -1622,7 +2159,7 @@ def page_cash_flow():
                 pdf_rows.append([str(v)[:80] for v in row])
             detail_table = Table(pdf_rows, repeatRows=1)
             detail_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FF5C8B")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5B7C8")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                 ("GRID", (0, 0), (-1, -1), 0.35, colors.grey),
                 ("FONTSIZE", (0, 0), (-1, -1), 7),
@@ -1898,7 +2435,7 @@ def page_cash_flow():
                             """, unsafe_allow_html=True)
 
                 st.markdown("#### 📝 Penjelasan & Interpretasi Rasio Arus Kas")
-                st.markdown(f"""
+                st.markdown("""
                 <div class="insight-box">
                     <h4>Ringkasan Kondisi Arus Kas & Kemampuan Bayar</h4>
                     <p><b>Arus Kas Operasi & Free Cash Flow:</b> Kas neto operasi positif dan tumbuh dari periode sebelumnya, sehingga mampu mendanai belanja modal (CapEx) serta menyisakan surplus kas bebas (Free Cash Flow).</p>
@@ -1934,7 +2471,7 @@ def page_cash_flow():
                 st.plotly_chart(
                     px.bar(trend_df, x="Periode", y=["Operasi", "Investasi", "Pendanaan"],
                            barmode="group", title="Perbandingan Arus Kas per Aktivitas",
-                           color_discrete_sequence=["#FF5C8B", "#7A1F3D", "#F8C8D4"]),
+                           color_discrete_sequence=["#F5B7C8", "#8C3B56", "#F5B7C8"]),
                     use_container_width=True
                 )
                 st.dataframe(trend_df, use_container_width=True, hide_index=True)
@@ -2117,8 +2654,8 @@ def page_cash_flow():
         outflows = work[work["_kas_keluar"] > 0]
         anomalies = pd.DataFrame()
         if len(outflows) >= 4:
-            q1 = outflows["_kas_keluar"].quantile(.25)
-            q3 = outflows["_kas_keluar"].quantile(.75)
+            q1 = outflows["_kas_keluar"].quantile(0.25)
+            q3 = outflows["_kas_keluar"].quantile(0.75)
             upper = q3 + 1.5 * (q3 - q1)
             anomalies = outflows[outflows["_kas_keluar"] > upper].copy()
 
@@ -2159,9 +2696,11 @@ def page_cash_flow():
                 {"Aktivitas": k, "Arus Kas Neto (Rp)": v} for k, v in res["totals"].items()
             ])
             st.dataframe(activity_df, use_container_width=True, hide_index=True)
-            st.plotly_chart(px.bar(activity_df, x="Aktivitas", y="Arus Kas Neto (Rp)",
-                                   title="Arus Kas Neto per Aktivitas",
-                                   color_discrete_sequence=["#FF5C8B"]), use_container_width=True)
+            st.plotly_chart(
+                px.bar(activity_df, x="Aktivitas", y="Arus Kas Neto (Rp)",
+                       title="Arus Kas Neto per Aktivitas", color_discrete_sequence=["#F5B7C8"]),
+                use_container_width=True
+            )
             st.caption("Klasifikasi otomatis berdasarkan kata kunci pada keterangan/kategori. Periksa dan koreksi kategori bila diperlukan.")
         with tab_ratios:
             st.markdown("#### 📐 Rasio Keuangan Arus Kas (Otomatis dari Transaksi)")
@@ -2223,13 +2762,17 @@ def page_cash_flow():
                 "- Free Cash Flow = Arus Kas Operasi − Belanja Modal (CapEx)"
             )
         with tab_trends:
-            st.plotly_chart(px.line(res["monthly"], x="_bulan", y=["Kas_Masuk", "Kas_Keluar"],
-                                    markers=True, title="Tren Kas Masuk dan Kas Keluar",
-                                    color_discrete_sequence=["#FF5C8B", "#7A1F3D"]),
-                            use_container_width=True)
-            st.plotly_chart(px.area(res["monthly"], x="_bulan", y="Saldo_Akhir_Estimasi",
-                                    title="Perkembangan Estimasi Saldo Kas",
-                                    color_discrete_sequence=["#FF5C8B"]), use_container_width=True)
+            st.plotly_chart(
+                px.line(res["monthly"], x="_bulan", y=["Kas_Masuk", "Kas_Keluar"],
+                        markers=True, title="Tren Kas Masuk dan Kas Keluar",
+                        color_discrete_sequence=["#F5B7C8", "#8C3B56"]),
+                use_container_width=True
+            )
+            st.plotly_chart(
+                px.area(res["monthly"], x="_bulan", y="Saldo_Akhir_Estimasi",
+                        title="Perkembangan Estimasi Saldo Kas", color_discrete_sequence=["#F5B7C8"]),
+                use_container_width=True
+            )
             st.dataframe(res["monthly"], use_container_width=True, hide_index=True)
         with tab_risk:
             risk_messages = []
@@ -2309,8 +2852,8 @@ def page_cash_flow():
             use_container_width=True
         )
 
+
 def _get_finora_study_materials():
-    """Mengembalikan 75 materi pembelajaran lengkap (25 per analisis: Audit, Keuangan, Arus Kas)."""
     audit_25 = [
         ("A-01", "Dasar", "Apa itu Audit dan Mengapa Penting?",
          "Audit adalah pemeriksaan sistematis dan objektif atas bukti asersi ekonomi untuk menilai kesesuaiannya dengan kriteria (PSAK/SAP/SOP).",
@@ -2697,9 +3240,11 @@ def page_learning_center():
             all_tracks["Analisis Arus Kas"]
         )
 
+
 def _go_to_nav(target_nav):
     st.session_state.selected_nav = target_nav
     st.session_state.nav_radio = target_nav
+
 
 def page_dashboard():
     finora_header("Dashboard", "Pusat akses cepat seluruh fitur analisis & pembelajaran FINORA AI")
@@ -2776,46 +3321,163 @@ def page_dashboard():
     st.subheader("🕐 Analisis Terakhir")
     recent = fetch_analyses()
     if not recent.empty:
-        recent['created_at'] = pd.to_datetime(recent['created_at']).dt.strftime("%Y-%m-%d %H:%M")
+        recent["created_at"] = pd.to_datetime(recent["created_at"]).dt.strftime("%Y-%m-%d %H:%M")
         st.dataframe(recent.head(5), use_container_width=True)
 
-def _landing_go_to(target_nav):
-    st.session_state.app_started = True
-    st.session_state.selected_nav = target_nav
-    st.session_state.nav_radio = target_nav
 
 def page_landing():
+    inject_scroll_reveal()
     st.markdown("""
     <style>
     [data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none !important; }
-    .stApp { background: radial-gradient(circle at top center, #FFF9F2 0%, #FFF5E8 58%, #FFEBF1 100%) !important; color: #2D1B24 !important; }
-    .finora-hero-card { background: rgba(255, 255, 255, 0.94); border: 1.5px solid #F7BDD0; border-radius: 24px; padding: 28px 32px; margin: 8px auto 24px auto; max-width: 1020px; box-shadow: 0 14px 36px rgba(122, 31, 61, 0.08); text-align: center; }
-    .finora-hero-badge { display: inline-block; background: #FFE6EE; color: #7A1F3D; border: 1px solid #F5B5C9; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; padding: 5px 14px; border-radius: 999px; margin-bottom: 10px; }
-    .finora-hero-title { color: #7A1F3D !important; font-size: 42px !important; font-weight: 800 !important; line-height: 1.15 !important; margin: 0 0 10px 0 !important; }
-    .finora-hero-subtitle { color: #3A232E; font-size: 15.5px; line-height: 1.65; max-width: 820px; margin: 0 auto 18px auto; }
+    .stApp {
+        background: radial-gradient(circle at top center, #F6F7D7 0%, #F6F7D7 58%, #F5B7C8 100%) !important;
+        color: #2D1B24 !important;
+    }
+    .finora-hero-card {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1.5px solid #F5B7C8;
+        border-radius: 24px;
+        padding: 28px 32px;
+        margin: 8px auto 24px auto;
+        max-width: 1020px;
+        box-shadow: 0 14px 36px rgba(122, 31, 61, 0.08);
+        text-align: center;
+    }
+    .finora-hero-badge {
+        display: inline-block;
+        background: #F5B7C8;
+        color: #8C3B56;
+        border: 1px solid #F5B7C8;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        padding: 5px 14px;
+        border-radius: 999px;
+        margin-bottom: 10px;
+    }
+    .finora-hero-title {
+        color: #8C3B56 !important;
+        font-size: 42px !important;
+        font-weight: 800 !important;
+        line-height: 1.15 !important;
+        margin: 0 0 10px 0 !important;
+    }
+    .finora-hero-subtitle {
+        color: #3A232E;
+        font-size: 15.5px;
+        line-height: 1.65;
+        max-width: 820px;
+        margin: 0 auto 18px auto;
+    }
     .finora-kpi-strip { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-    .finora-kpi-pill { background: #FFF7F9; border: 1px solid #F4CAD7; border-radius: 12px; padding: 7px 13px; font-size: 12px; font-weight: 700; color: #7A1F3D; }
+    .finora-kpi-pill {
+        background: #F6F7D7;
+        border: 1px solid #F5B7C8;
+        border-radius: 12px;
+        padding: 7px 13px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #8C3B56;
+    }
     .finora-section-head { text-align: center; margin: 16px auto 16px auto; max-width: 860px; }
-    .finora-section-head h2 { color: #7A1F3D !important; font-size: 25px !important; font-weight: 800 !important; margin: 0 0 4px 0 !important; }
+    .finora-section-head h2 {
+        color: #8C3B56 !important;
+        font-size: 25px !important;
+        font-weight: 800 !important;
+        margin: 0 0 4px 0 !important;
+    }
     .finora-section-head p { color: #5C434E; font-size: 13.5px; margin: 0; }
-    .finora-cap-card { background: #FFFFFF; border: 1px solid #F4CAD7; border-top: 4px solid #FF5C8B; border-radius: 18px; padding: 20px; box-shadow: 0 6px 20px rgba(122, 31, 61, 0.05); height: 100%; }
-    .finora-cap-icon { width: 42px; height: 42px; line-height: 42px; text-align: center; border-radius: 12px; background: #FFF0F5; border: 1px solid #F8C8D4; font-size: 21px; margin-bottom: 10px; }
-    .finora-cap-title { color: #7A1F3D; font-size: 17.5px; font-weight: 800; margin: 0 0 6px 0; }
+    .finora-cap-card {
+        background: #FFFFFF;
+        border: 1px solid #F5B7C8;
+        border-top: 4px solid #F5B7C8;
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: 0 6px 20px rgba(122, 31, 61, 0.05);
+        height: 100%;
+    }
+    .finora-cap-icon {
+        width: 42px;
+        height: 42px;
+        line-height: 42px;
+        text-align: center;
+        border-radius: 12px;
+        background: #FFF0F5;
+        border: 1px solid #F5B7C8;
+        font-size: 21px;
+        margin-bottom: 10px;
+    }
+    .finora-cap-title { color: #8C3B56; font-size: 17.5px; font-weight: 800; margin: 0 0 6px 0; }
     .finora-cap-desc { color: #46303A; font-size: 13px; line-height: 1.5; margin: 0 0 10px 0; }
     .finora-cap-list { margin: 0 0 10px 0; padding-left: 18px; color: #4F3842; font-size: 12.5px; line-height: 1.5; }
-    .finora-cap-tags { font-size: 11.5px; font-weight: 700; color: #9A3B5B; border-top: 1px dashed #F4D2DC; padding-top: 8px; }
-    .finora-panel-box { background: rgba(255, 255, 255, 0.90); border: 1px solid #F4CAD7; border-radius: 20px; padding: 20px 22px; margin: 18px auto; max-width: 1020px; }
-    .finora-panel-title { text-align: center; font-size: 18px; font-weight: 800; color: #7A1F3D; margin: 0 0 4px 0; }
+    .finora-cap-tags {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: #9A3B5B;
+        border-top: 1px dashed #F5B7C8;
+        padding-top: 8px;
+    }
+    .finora-panel-box {
+        background: rgba(255, 255, 255, 0.90);
+        border: 1px solid #F5B7C8;
+        border-radius: 20px;
+        padding: 20px 22px;
+        margin: 18px auto;
+        max-width: 1020px;
+    }
+    .finora-panel-title { text-align: center; font-size: 18px; font-weight: 800; color: #8C3B56; margin: 0 0 4px 0; }
     .finora-panel-sub { text-align: center; font-size: 13px; color: #634853; margin: 0 0 14px 0; }
-    .finora-step-item { background: #FFF9FB; border: 1px solid #F7D6E0; border-radius: 14px; padding: 13px 14px; height: 100%; }
-    .finora-step-num { font-size: 11px; font-weight: 800; color: #FF5C8B; text-transform: uppercase; letter-spacing: 0.5px; }
-    .finora-step-title { font-size: 14px; font-weight: 800; color: #7A1F3D; margin: 3px 0 4px 0; }
+    .finora-step-item {
+        background: #F6F7D7;
+        border: 1px solid #F5B7C8;
+        border-radius: 14px;
+        padding: 13px 14px;
+        height: 100%;
+    }
+    .finora-step-num {
+        font-size: 11px;
+        font-weight: 800;
+        color: #F5B7C8;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .finora-step-title { font-size: 14px; font-weight: 800; color: #8C3B56; margin: 3px 0 4px 0; }
     .finora-step-desc { font-size: 12px; color: #4F3842; line-height: 1.45; margin: 0; }
-    .finora-mini-card { background: #FFF9FB; border: 1px solid #F5CBD8; border-radius: 14px; padding: 14px 16px; height: 100%; }
-    .finora-mini-card h4 { color: #7A1F3D !important; font-size: 15px !important; font-weight: 800 !important; margin: 0 0 6px 0 !important; }
+    .finora-mini-card {
+        background: #F6F7D7;
+        border: 1px solid #F5B7C8;
+        border-radius: 14px;
+        padding: 14px 16px;
+        height: 100%;
+    }
+    .finora-mini-card h4 {
+        color: #8C3B56 !important;
+        font-size: 15px !important;
+        font-weight: 800 !important;
+        margin: 0 0 6px 0 !important;
+    }
     .finora-mini-card p { color: #4A333D; font-size: 12.5px; line-height: 1.5; margin: 0; }
-    .finora-cta-box { background: linear-gradient(135deg, #FFF0F5 0%, #FFF7EC 100%); border: 1.5px solid #F5B5C9; border-radius: 22px; padding: 24px 26px; margin: 20px auto 10px auto; max-width: 1020px; text-align: center; }
-    .finora-cta-btn > button { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%) !important; color: #FFFFFF !important; font-size: 16px !important; font-weight: 800 !important; padding: 15px 28px !important; border-radius: 14px !important; border: none !important; box-shadow: 0 8px 22px rgba(122, 31, 61, 0.24) !important; }
+    .finora-cta-box {
+        background: linear-gradient(135deg, #FFF0F5 0%, #F6F7D7 100%);
+        border: 1.5px solid #F5B7C8;
+        border-radius: 22px;
+        padding: 24px 26px;
+        margin: 20px auto 10px auto;
+        max-width: 1020px;
+        text-align: center;
+    }
+    .finora-cta-btn > button {
+        background: linear-gradient(135deg, #F5B7C8 0%, #8C3B56 100%) !important;
+        color: #FFFFFF !important;
+        font-size: 16px !important;
+        font-weight: 800 !important;
+        padding: 15px 28px !important;
+        border-radius: 14px !important;
+        border: none !important;
+        box-shadow: 0 8px 22px rgba(122, 31, 61, 0.24) !important;
+    }
     .finora-footer-note { text-align: center; color: #7A5C68; font-size: 12px; margin-top: 12px; margin-bottom: 16px; }
     </style>
     """, unsafe_allow_html=True)
@@ -2823,11 +3485,22 @@ def page_landing():
     _, logo_col, _ = st.columns([1.6, 1.2, 1.6])
     with logo_col:
         if LOGO_B64:
-            st.markdown(f'<div style="display:flex;justify-content:center;align-items:center;margin:6px auto 12px auto;"><img src="data:image/png;base64,{LOGO_B64}" alt="FINORA AI Logo" style="width:168px;height:168px;object-fit:contain;border-radius:50%;background:#FFFFFF;border:3px solid #FF5C8B;padding:6px;box-shadow:0 10px 26px rgba(122,31,61,0.16);display:block;"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="display:flex;justify-content:center;align-items:center;margin:6px auto 12px auto;">'
+                f'<img src="data:image/png;base64,{LOGO_B64}" alt="FINORA AI Logo" '
+                f'style="width:168px;height:168px;object-fit:contain;border-radius:50%;background:#FFFFFF;'
+                f'border:3px solid #F5B7C8;padding:6px;box-shadow:0 10px 26px rgba(122,31,61,0.16);display:block;"></div>',
+                unsafe_allow_html=True
+            )
         elif os.path.exists(LOGO_FILENAME):
             st.image(LOGO_FILENAME, width=168)
         else:
-            st.markdown('<div style="width:136px;height:136px;line-height:136px;border-radius:50%;background:linear-gradient(135deg,#FF5C8B,#7A1F3D);color:white;font-size:52px;font-weight:800;text-align:center;margin:6px auto 12px auto;">F</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div style="width:136px;height:136px;line-height:136px;border-radius:50%;'
+                'background:linear-gradient(135deg,#F5B7C8,#8C3B56);color:white;font-size:52px;'
+                'font-weight:800;text-align:center;margin:6px auto 12px auto;">F</div>',
+                unsafe_allow_html=True
+            )
 
     st.markdown("""
     <div class="finora-hero-card">
@@ -2847,10 +3520,50 @@ def page_landing():
     """, unsafe_allow_html=True)
 
     capabilities = [
-        {"icon": "🔎", "title": "Audit Profesional & KKA", "desc": "Pemeriksaan otomatis data transaksi untuk mendeteksi penyimpangan, duplikasi, dan potensi risiko pengendalian intern.", "bullets": ["Kelengkapan data, duplikasi ekstrem, & nilai negatif", "Transaksi weekend, kata kunci mencurigakan, & overbudget", "Deteksi outlier nominal (IQR), skor risiko, & KKA PDF/Excel"], "tags": "7 Prosedur Audit • Skor Risiko • Bukti & KKA"},
-        {"icon": "📈", "title": "Analisis Laporan Keuangan", "desc": "Evaluasi posisi keuangan, kinerja, dan kapasitas fiskal untuk Perusahaan Swasta/Tbk maupun Pemerintahan/BLU.", "bullets": ["Swasta/Tbk: Current Ratio, NPM, ROA, ROE, & DER", "Pemda/BLU: Efektivitas, Efisiensi, Kemandirian, & Pertumbuhan", "Visualisasi anggaran vs realisasi serta laporan PDF & Excel"], "tags": "Swasta/Tbk & Sektor Publik • Rasio & Rekomendasi"},
-        {"icon": "💧", "title": "Cash Flow Intelligence (PSAK 207)", "desc": "Analisis laporan arus kas multi-periode (Operasi, Investasi, Pendanaan) atau mutasi transaksi kas harian/bulanan.", "bullets": ["Rekonsiliasi saldo kas awal, perubahan neto, & saldo akhir", "Free Cash Flow (FCF), rasio arus kas, & tren antarperiode", "Deteksi anomali pengeluaran IQR & indikator risiko likuiditas"], "tags": "PSAK 207 • Free Cash Flow • Tren & Risiko Kas"},
-        {"icon": "📚", "title": "FINORA Study & AI Advisor", "desc": "Pusat pembelajaran terstruktur dan asisten AI terarah untuk membantu memahami konsep sekaligus menafsirkan hasil data.", "bullets": ["75 materi terstruktur (25 Audit, 25 Keuangan, 25 Arus Kas)", "Filter level Dasar, Menengah, Lanjutan & pencarian topik", "Ringkasan otomatis Gemini AI + pertanyaan terarah & kustom"], "tags": "75 Materi • Dasar–Lanjutan • Gemini AI"},
+        {
+            "icon": "🔎",
+            "title": "Audit Profesional & KKA",
+            "desc": "Pemeriksaan otomatis data transaksi untuk mendeteksi penyimpangan, duplikasi, dan potensi risiko pengendalian intern.",
+            "bullets": [
+                "Kelengkapan data, duplikasi ekstrem, & nilai negatif",
+                "Transaksi weekend, kata kunci mencurigakan, & overbudget",
+                "Deteksi outlier nominal (IQR), skor risiko, & KKA PDF/Excel"
+            ],
+            "tags": "7 Prosedur Audit • Skor Risiko • Bukti & KKA"
+        },
+        {
+            "icon": "📈",
+            "title": "Analisis Laporan Keuangan",
+            "desc": "Evaluasi posisi keuangan, kinerja, dan kapasitas fiskal untuk Perusahaan Swasta/Tbk maupun Pemerintahan/BLU.",
+            "bullets": [
+                "Swasta/Tbk: Current Ratio, NPM, ROA, ROE, & DER",
+                "Pemda/BLU: Efektivitas, Efisiensi, Kemandirian, & Pertumbuhan",
+                "Visualisasi anggaran vs realisasi serta laporan PDF & Excel"
+            ],
+            "tags": "Swasta/Tbk & Sektor Publik • Rasio & Rekomendasi"
+        },
+        {
+            "icon": "💧",
+            "title": "Cash Flow Intelligence (PSAK 207)",
+            "desc": "Analisis laporan arus kas multi-periode (Operasi, Investasi, Pendanaan) atau mutasi transaksi kas harian/bulanan.",
+            "bullets": [
+                "Rekonsiliasi saldo kas awal, perubahan neto, & saldo akhir",
+                "Free Cash Flow (FCF), rasio arus kas, & tren antarperiode",
+                "Deteksi anomali pengeluaran IQR & indikator risiko likuiditas"
+            ],
+            "tags": "PSAK 207 • Free Cash Flow • Tren & Risiko Kas"
+        },
+        {
+            "icon": "📚",
+            "title": "FINORA Study & AI Advisor",
+            "desc": "Pusat pembelajaran terstruktur dan asisten AI terarah untuk membantu memahami konsep sekaligus menafsirkan hasil data.",
+            "bullets": [
+                "75 materi terstruktur (25 Audit, 25 Keuangan, 25 Arus Kas)",
+                "Filter level Dasar, Menengah, Lanjutan & pencarian topik",
+                "Ringkasan otomatis Gemini AI + pertanyaan terarah & kustom"
+            ],
+            "tags": "75 Materi • Dasar–Lanjutan • Gemini AI"
+        },
     ]
 
     for row_start in (0, 2):
@@ -2859,7 +3572,12 @@ def page_landing():
             cap = capabilities[row_start + idx_off]
             b_html = "".join(f"<li>{item}</li>" for item in cap["bullets"])
             with cols_cap[idx_off]:
-                st.markdown(f'<div class="finora-cap-card"><div class="finora-cap-icon">{cap["icon"]}</div><div class="finora-cap-title">{cap["title"]}</div><p class="finora-cap-desc">{cap["desc"]}</p><ul class="finora-cap-list">{b_html}</ul><div class="finora-cap-tags">{cap["tags"]}</div></div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="finora-cap-card"><div class="finora-cap-icon">{cap["icon"]}</div>'
+                    f'<div class="finora-cap-title">{cap["title"]}</div><p class="finora-cap-desc">{cap["desc"]}</p>'
+                    f'<ul class="finora-cap-list">{b_html}</ul><div class="finora-cap-tags">{cap["tags"]}</div></div>',
+                    unsafe_allow_html=True
+                )
         if row_start == 0:
             st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
@@ -2881,7 +3599,7 @@ def page_landing():
         st.markdown('<div class="finora-mini-card"><h4>🏛️ Pemerintahan / BLU</h4><p>Mendukung evaluasi anggaran dan realisasi pendapatan/belanja, surplus/defisit, PAD, efektivitas, efisiensi, kemandirian, dan pertumbuhan.</p></div>', unsafe_allow_html=True)
     with e3:
         st.markdown('<div class="finora-mini-card"><h4>🎓 Akademisi, Auditor & Analis</h4><p>Membantu penyusunan Kertas Kerja Audit (KKA), pemeriksaan anomali transaksi, serta pembelajaran mandiri melalui 75 materi FINORA Study.</p></div>', unsafe_allow_html=True)
-    st.markdown('</div><div class="finora-cta-box"><div style="font-size:20px;font-weight:800;color:#7A1F3D;margin-bottom:6px;">Siap Memulai Analisis di FINORA AI?</div><div style="font-size:13.5px;color:#533944;max-width:680px;margin:0 auto 18px auto;">Masuk ke Dashboard utama untuk memilih modul Audit Profesional, Analisis Keuangan, Analisis Arus Kas, atau FINORA Study.</div>', unsafe_allow_html=True)
+    st.markdown('</div><div class="finora-cta-box"><div style="font-size:20px;font-weight:800;color:#8C3B56;margin-bottom:6px;">Siap Memulai Analisis di FINORA AI?</div><div style="font-size:13.5px;color:#533944;max-width:680px;margin:0 auto 18px auto;">Masuk ke Dashboard utama untuk memilih modul Audit Profesional, Analisis Keuangan, Analisis Arus Kas, atau FINORA Study.</div>', unsafe_allow_html=True)
     _, cta_mid, _ = st.columns([1.2, 2.2, 1.2])
     with cta_mid:
         st.markdown('<div class="finora-cta-btn">', unsafe_allow_html=True)
@@ -2892,6 +3610,7 @@ def page_landing():
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div><div class="finora-footer-note">⚠️ Hasil deteksi anomali, rasio, dan insight AI merupakan alat bantu analisis—tetap lakukan verifikasi bukti & dokumen sumber.</div>', unsafe_allow_html=True)
+
 
 def main():
     if "app_started" not in st.session_state:
@@ -2914,8 +3633,8 @@ def main():
         st.sidebar.markdown("""
         <style>
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #FFF5F8 0%, #FFF9F2 100%);
-            border-right: 1px solid #F8C8D4;
+            background: linear-gradient(180deg, #FFF5F8 0%, #F6F7D7 100%);
+            border-right: 1px solid #F5B7C8;
         }
         .finora-sidebar-brand {
             display: flex;
@@ -2926,7 +3645,7 @@ def main():
             padding: 14px 10px 10px 10px;
             margin: 4px auto 8px auto;
             background: rgba(255, 255, 255, 0.85);
-            border: 1px solid #F8C8D4;
+            border: 1px solid #F5B7C8;
             border-radius: 16px;
             box-shadow: 0 4px 12px rgba(122, 31, 61, 0.06);
         }
@@ -2942,7 +3661,7 @@ def main():
         .finora-sidebar-title {
             font-size: 15px;
             font-weight: 800;
-            color: #7A1F3D;
+            color: #8C3B56;
             letter-spacing: 0.4px;
             margin: 0;
         }
@@ -2956,7 +3675,7 @@ def main():
         [data-testid="stSidebar"] [data-testid="stRadio"] > label {
             font-size: 12px;
             font-weight: 700;
-            color: #7A1F3D;
+            color: #8C3B56;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 6px;
@@ -2966,15 +3685,15 @@ def main():
         }
         [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label {
             background: rgba(255, 255, 255, 0.72);
-            border: 1px solid #F4D2DC;
+            border: 1px solid #F5B7C8;
             border-radius: 10px;
             padding: 8px 12px;
             margin: 0;
             transition: all 0.2s ease;
         }
         [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label:hover {
-            background: #FFE8EF;
-            border-color: #FF5C8B;
+            background: #F5B7C8;
+            border-color: #F5B7C8;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -2990,7 +3709,9 @@ def main():
         else:
             st.sidebar.markdown(
                 '<div class="finora-sidebar-brand">'
-                '<div style="width:64px;height:64px;line-height:64px;border-radius:50%;background:linear-gradient(135deg,#FF5C8B,#7A1F3D);color:white;font-size:28px;font-weight:800;margin:0 auto 8px auto;">F</div>'
+                '<div style="width:64px;height:64px;line-height:64px;border-radius:50%;'
+                'background:linear-gradient(135deg,#F5B7C8,#8C3B56);color:white;font-size:28px;'
+                'font-weight:800;margin:0 auto 8px auto;">F</div>'
                 '<div class="finora-sidebar-title">FINORA AI</div>'
                 '<div class="finora-sidebar-sub">Financial Intelligence Platform</div>'
                 '</div>',
@@ -3009,11 +3730,17 @@ def main():
             st.session_state.app_started = False
             st.rerun()
         st.sidebar.caption("⚠️ Temuan bersifat indikasi dan perlu verifikasi dokumen fisik.")
-        if nav == "Dashboard": page_dashboard()
-        elif nav == "Audit Profesional": page_audit()
-        elif nav == "Analisis Keuangan": page_financial_analysis()
-        elif nav == "Analisis Arus Kas": page_cash_flow()
-        elif nav == "FINORA Study": page_learning_center()
+        if nav == "Dashboard":
+            page_dashboard()
+        elif nav == "Audit Profesional":
+            page_audit()
+        elif nav == "Analisis Keuangan":
+            page_financial_analysis()
+        elif nav == "Analisis Arus Kas":
+            page_cash_flow()
+        elif nav == "FINORA Study":
+            page_learning_center()
+
 
 if __name__ == "__main__":
     main()
