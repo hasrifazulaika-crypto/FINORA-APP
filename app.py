@@ -514,52 +514,228 @@ def audit_outliers_iqr(df, amount_col):
 # ============================================================
 # SMART FINANCIAL ENGINE & INSIGHT
 # ============================================================
-def auto_extract_financials(df, entity_type):
-    results = {"pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0, "total_aset": 0.0, "total_liabilitas": 0.0, "ekuitas": 0.0, "real_pendapatan": 0.0, "ang_pendapatan": 0.0, "real_belanja": 0.0, "ang_belanja": 0.0, "surplus": 0.0, "pad": 0.0}
-    str_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
-    num_cols = df.select_dtypes(include=['number', 'float', 'int']).columns.tolist()
-    if not str_cols or not num_cols: return results
-    name_col = str_cols[0] 
-    real_col, ang_col = None, None
-    for c in num_cols:
-        c_str = str(c).lower()
-        if 'realisasi' in c_str or 'real' in c_str: real_col = c
-        elif 'anggaran' in c_str or 'ang' in c_str or 'pagu' in c_str: ang_col = c
-    if not real_col and len(num_cols) > 0: real_col = num_cols[0]
-    if not ang_col and len(num_cols) > 1: ang_col = num_cols[1]
-    clean_names = df[name_col].astype(str).str.lower().str.replace(r'[^a-z\s]', '', regex=True).str.strip()
+def _detect_fin_header_row(raw_df, max_scan=60):
+    keywords = [
+        "uraian", "akun", "keterangan", "pos", "komponen", "deskripsi",
+        "realisasi", "anggaran", "pagu", "nilai", "jumlah", "saldo", "nominal", "kode"
+    ]
+    best_idx, best_score = 0, -1
+    for i in range(min(max_scan, len(raw_df))):
+        vals = [str(v).strip().lower() for v in raw_df.iloc[i].tolist() if pd.notna(v) and str(v).strip() != ""]
+        if len(vals) < 2:
+            continue
+        score = 0
+        for v in vals:
+            if any(k in v for k in keywords):
+                score += 3
+            if re.search(r"\b(20\d{2}|19\d{2})\b", v) or "tahun" in v or "periode" in v:
+                score += 2
+        if score > best_score and score > 0:
+            best_score = score
+            best_idx = i
+    return best_idx
 
-    def get_total(target_col, exact_keys, contains_keys=[]):
-        if not target_col: return 0.0
+def _detect_fin_columns(df):
+    cols = list(df.columns)
+    name_col = None
+    best_text_score = -1
+    for c in cols:
+        s = df[c].dropna().astype(str).str.strip()
+        s = s[~s.str.lower().isin(["nan", "none", ""])]
+        if s.empty:
+            continue
+        # Kolom uraian/akun biasanya berisi banyak teks huruf (bukan sekadar kode angka)
+        alpha_ratio = s.str.contains(r"[a-zA-Z]{3,}", regex=True).mean()
+        avg_len = s.str.len().mean()
+        header_bonus = 5.0 if any(k in str(c).lower() for k in ["uraian", "akun", "keterangan", "pos", "komponen", "deskripsi", "nama"]) else 0.0
+        score = alpha_ratio * 10.0 + min(avg_len, 40.0) * 0.1 + header_bonus
+        if score > best_text_score and alpha_ratio > 0.25:
+            best_text_score = score
+            name_col = c
+    if not name_col and cols:
+        name_col = cols[0]
+
+    numeric_cols = []
+    for c in cols:
+        if c == name_col:
+            continue
+        parsed = df[c].apply(clean_currency)
+        non_zero = (parsed != 0).sum()
+        c_low = str(c).lower()
+        is_named_val = any(k in c_low for k in ["realisasi", "real", "anggaran", "ang", "pagu", "nilai", "jumlah", "saldo", "nominal", "rp", "idr"]) or bool(re.search(r"\b(20\d{2}|19\d{2})\b", c_low))
+        if non_zero >= 1 or is_named_val:
+            numeric_cols.append(c)
+
+    real_col, ang_col, prev_col = None, None, None
+    for c in numeric_cols:
+        c_str = str(c).lower()
+        if not real_col and any(k in c_str for k in ["realisasi", "real", "aktual", "actual", "saldo akhir", "nilai", "jumlah"]):
+            real_col = c
+        elif not ang_col and any(k in c_str for k in ["anggaran", "ang", "pagu", "target", "budget"]):
+            ang_col = c
+
+    # Urutkan kolom tahun jika header berupa tahun (mis. 2024 vs 2023)
+    year_cols = []
+    for c in numeric_cols:
+        m = re.search(r"\b(20\d{2}|19\d{2})\b", str(c))
+        if m:
+            year_cols.append((int(m.group(1)), c))
+    if year_cols:
+        year_cols.sort(key=lambda x: x[0], reverse=True)
+        if not real_col:
+            real_col = year_cols[0][1]
+        if len(year_cols) > 1 and not prev_col:
+            prev_col = year_cols[1][1]
+
+    if not real_col and len(numeric_cols) > 0:
+        real_col = numeric_cols[0]
+    if not ang_col:
+        for c in numeric_cols:
+            if c != real_col:
+                ang_col = c
+                break
+    if not prev_col and ang_col and ang_col != real_col:
+        prev_col = ang_col
+
+    return {
+        "name_col": name_col,
+        "real_col": real_col,
+        "ang_col": ang_col,
+        "prev_col": prev_col,
+        "numeric_cols": numeric_cols,
+    }
+
+def auto_extract_financials(df, entity_type, name_col=None, real_col=None, ang_col=None, prev_col=None):
+    results = {
+        "pendapatan": 0.0, "laba": 0.0, "aset_lancar": 0.0, "liabilitas_lancar": 0.0,
+        "total_aset": 0.0, "total_liabilitas": 0.0, "ekuitas": 0.0,
+        "real_pendapatan": 0.0, "ang_pendapatan": 0.0, "prev_pendapatan": 0.0,
+        "real_belanja": 0.0, "ang_belanja": 0.0, "surplus": 0.0, "pad": 0.0
+    }
+    if df is None or df.empty:
+        return results
+
+    detected = _detect_fin_columns(df)
+    name_col = name_col or detected["name_col"]
+    real_col = real_col or detected["real_col"]
+    ang_col = ang_col or detected["ang_col"]
+    prev_col = prev_col or detected["prev_col"]
+
+    if not name_col or name_col not in df.columns:
+        return results
+
+    clean_names = (
+        df[name_col]
+        .astype(str)
+        .str.lower()
+        .str.replace(r'[^a-z\s]', ' ', regex=True)
+        .str.replace(r'\s+', ' ', regex=True)
+        .str.strip()
+    )
+
+    def _col_series(col_name):
+        if not col_name or col_name not in df.columns:
+            return pd.Series(0.0, index=df.index)
+        return df[col_name].apply(clean_currency)
+
+    real_vals = _col_series(real_col)
+    ang_vals = _col_series(ang_col)
+    prev_vals = _col_series(prev_col)
+
+    def get_total(val_series, exact_keys, contains_keys=None):
         if exact_keys:
             mask_exact = clean_names.isin(exact_keys)
-            if mask_exact.any(): return pd.to_numeric(df.loc[mask_exact, target_col], errors='coerce').fillna(0).sum()
+            if mask_exact.any():
+                s_exact = val_series.loc[mask_exact]
+                non_zero_exact = s_exact[s_exact != 0]
+                if not non_zero_exact.empty:
+                    # Jika ada beberapa baris total persis sama (misal header & total), ambil nilai absolut terbesar agar tidak double-count
+                    return float(non_zero_exact.loc[non_zero_exact.abs().idxmax()])
         if contains_keys:
-            mask_contains = clean_names.str.contains('|'.join(contains_keys), na=False)
-            if mask_contains.any(): return pd.to_numeric(df.loc[mask_contains, target_col], errors='coerce').fillna(0).sum()
+            for key in contains_keys:
+                mask_c = clean_names.str.contains(re.escape(key), na=False)
+                if mask_c.any():
+                    s_c = val_series.loc[mask_c]
+                    non_zero_c = s_c[s_c != 0]
+                    if not non_zero_c.empty:
+                        return float(non_zero_c.loc[non_zero_c.abs().idxmax()])
         return 0.0
 
+    def sum_components(val_series, component_keys):
+        total = 0.0
+        for key in component_keys:
+            mask_c = clean_names.str.contains(re.escape(key), na=False)
+            if mask_c.any():
+                s_c = val_series.loc[mask_c]
+                non_zero_c = s_c[s_c != 0]
+                if not non_zero_c.empty:
+                    total += float(non_zero_c.loc[non_zero_c.abs().idxmax()])
+        return total
+
     if "Pemerintahan" in entity_type:
-        real_p = get_total(real_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
-        if real_p == 0: real_p = get_total(real_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
-        ang_p = get_total(ang_col, ['total pendapatan', 'jumlah pendapatan', 'pendapatan daerah', 'pendapatan'])
-        if ang_p == 0: ang_p = get_total(ang_col, [], ['pendapatan asli daerah', 'dana perimbangan', 'dana transfer', 'lainlain pendapatan'])
-        real_b = get_total(real_col, ['total belanja', 'jumlah belanja', 'belanja daerah', 'belanja'])
-        if real_b == 0: real_b = get_total(real_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
-        ang_b = get_total(ang_col, ['total belanja', 'jumlah belanja', 'belanja daerah', 'belanja'])
-        if ang_b == 0: ang_b = get_total(ang_col, [], ['belanja operasi', 'belanja modal', 'belanja tak terduga'])
-        pad = get_total(real_col, ['pendapatan asli daerah', 'jumlah pendapatan asli daerah', 'total pendapatan asli daerah', 'pad'], ['pendapatan asli daerah'])
-        surplus = get_total(real_col, [], ['surplus', 'defisit'])
-        if surplus == 0: surplus = real_p - real_b
-        results.update({"real_pendapatan": real_p, "ang_pendapatan": ang_p, "real_belanja": real_b, "ang_belanja": ang_b, "pad": pad, "surplus": surplus})
+        pendapatan_exact = [
+            'total pendapatan', 'jumlah pendapatan', 'pendapatan daerah',
+            'pendapatan lra', 'jumlah pendapatan daerah', 'total pendapatan daerah',
+            'jumlah pendapatan negara', 'pendapatan negara dan hibah'
+        ]
+        pendapatan_comp = ['pendapatan asli daerah', 'pendapatan transfer', 'dana perimbangan', 'dana transfer', 'lain lain pendapatan']
+        belanja_exact = [
+            'total belanja', 'jumlah belanja', 'belanja daerah',
+            'jumlah belanja daerah', 'total belanja daerah', 'belanja dan transfer',
+            'jumlah belanja dan transfer', 'total belanja negara'
+        ]
+        belanja_comp = ['belanja operasi', 'belanja modal', 'belanja tak terduga', 'belanja transfer', 'belanja pegawai', 'belanja barang']
+
+        real_p = get_total(real_vals, pendapatan_exact, ['jumlah pendapatan', 'total pendapatan', 'pendapatan daerah'])
+        if real_p == 0:
+            real_p = sum_components(real_vals, pendapatan_comp)
+        if real_p == 0:
+            real_p = get_total(real_vals, ['pendapatan'], ['pendapatan'])
+
+        ang_p = get_total(ang_vals, pendapatan_exact, ['jumlah pendapatan', 'total pendapatan', 'pendapatan daerah'])
+        if ang_p == 0:
+            ang_p = sum_components(ang_vals, pendapatan_comp)
+        if ang_p == 0:
+            ang_p = get_total(ang_vals, ['pendapatan'], ['pendapatan'])
+
+        prev_p = get_total(prev_vals, pendapatan_exact, ['jumlah pendapatan', 'total pendapatan', 'pendapatan daerah'])
+        if prev_p == 0:
+            prev_p = sum_components(prev_vals, pendapatan_comp)
+
+        real_b = get_total(real_vals, belanja_exact, ['jumlah belanja', 'total belanja', 'belanja daerah'])
+        if real_b == 0:
+            real_b = sum_components(real_vals, belanja_comp)
+        if real_b == 0:
+            real_b = get_total(real_vals, ['belanja', 'beban'], ['belanja', 'beban'])
+
+        ang_b = get_total(ang_vals, belanja_exact, ['jumlah belanja', 'total belanja', 'belanja daerah'])
+        if ang_b == 0:
+            ang_b = sum_components(ang_vals, belanja_comp)
+        if ang_b == 0:
+            ang_b = get_total(ang_vals, ['belanja', 'beban'], ['belanja', 'beban'])
+
+        pad = get_total(
+            real_vals,
+            ['pendapatan asli daerah', 'jumlah pendapatan asli daerah', 'total pendapatan asli daerah', 'pad', 'pendapatan asli daerah pad'],
+            ['pendapatan asli daerah', 'pad']
+        )
+        surplus = get_total(real_vals, ['surplus defisit', 'surplus defisit lra', 'surplus defisit lo'], ['surplus', 'defisit'])
+        if surplus == 0 and (real_p != 0 or real_b != 0):
+            surplus = real_p - real_b
+
+        results.update({
+            "real_pendapatan": real_p, "ang_pendapatan": ang_p, "prev_pendapatan": prev_p,
+            "real_belanja": real_b, "ang_belanja": ang_b, "pad": pad, "surplus": surplus
+        })
     else:
-        results["pendapatan"] = get_total(real_col, ['total pendapatan', 'pendapatan', 'total penjualan', 'penjualan'], ['pendapatan', 'penjualan', 'revenue'])
-        results["laba"] = get_total(real_col, ['laba bersih', 'laba tahun berjalan'], ['laba bersih', 'net income'])
-        results["total_aset"] = get_total(real_col, ['total aset', 'jumlah aset'], ['total aset', 'total asset'])
-        results["ekuitas"] = get_total(real_col, ['total ekuitas', 'total modal'], ['total ekuitas', 'total equity'])
-        results["total_liabilitas"] = get_total(real_col, ['total liabilitas', 'total utang'], ['total liabilitas', 'total utang'])
-        results["aset_lancar"] = get_total(real_col, ['total aset lancar'], ['aset lancar', 'current asset'])
-        results["liabilitas_lancar"] = get_total(real_col, ['total liabilitas jangka pendek', 'total utang lancar'], ['liabilitas jangka pendek', 'utang lancar', 'current liab'])
+        results["pendapatan"] = get_total(real_vals, ['total pendapatan', 'jumlah pendapatan', 'pendapatan', 'total penjualan', 'penjualan', 'pendapatan usaha'], ['total pendapatan', 'total penjualan', 'pendapatan', 'penjualan', 'revenue'])
+        results["prev_pendapatan"] = get_total(prev_vals, ['total pendapatan', 'jumlah pendapatan', 'pendapatan', 'total penjualan', 'penjualan', 'pendapatan usaha'], ['total pendapatan', 'total penjualan', 'pendapatan', 'penjualan', 'revenue'])
+        results["laba"] = get_total(real_vals, ['laba bersih', 'laba tahun berjalan', 'laba periode berjalan', 'laba rugi bersih'], ['laba bersih', 'laba tahun berjalan', 'net income', 'laba'])
+        results["total_aset"] = get_total(real_vals, ['total aset', 'jumlah aset', 'total aktiva', 'jumlah aktiva'], ['total aset', 'jumlah aset', 'total asset'])
+        results["ekuitas"] = get_total(real_vals, ['total ekuitas', 'jumlah ekuitas', 'total modal', 'jumlah modal'], ['total ekuitas', 'jumlah ekuitas', 'total equity', 'ekuitas'])
+        results["total_liabilitas"] = get_total(real_vals, ['total liabilitas', 'jumlah liabilitas', 'total utang', 'total kewajiban'], ['total liabilitas', 'jumlah liabilitas', 'total utang', 'total kewajiban'])
+        results["aset_lancar"] = get_total(real_vals, ['total aset lancar', 'jumlah aset lancar', 'aset lancar'], ['aset lancar', 'current asset'])
+        results["liabilitas_lancar"] = get_total(real_vals, ['total liabilitas jangka pendek', 'jumlah liabilitas jangka pendek', 'total utang lancar', 'liabilitas lancar'], ['liabilitas jangka pendek', 'liabilitas lancar', 'utang lancar', 'current liab'])
     return results
 
 def hitung_rasio_dari_nilai(nilai, entity_type):
@@ -570,7 +746,8 @@ def hitung_rasio_dari_nilai(nilai, entity_type):
         rasio["Efektivitas Pendapatan (%)"] = round((real_p / ang_p) * 100, 2) if ang_p > 0 else 0.0
         rasio["Efisiensi Belanja (%)"] = round((real_b / ang_b) * 100, 2) if ang_b > 0 else 0.0
         rasio["Kemandirian Daerah (%)"] = round((pad / real_p) * 100, 2) if real_p > 0 else 0.0
-        rasio["Pertumbuhan Pendapatan (%)"] = 0.0 
+        prev_p = nilai.get("prev_pendapatan", 0)
+        rasio["Pertumbuhan Pendapatan (%)"] = round(((real_p - prev_p) / prev_p) * 100, 2) if prev_p > 0 and prev_p != nilai.get("ang_pendapatan", 0) else 0.0 
     else:
         pendapatan = nilai.get("pendapatan", 0); laba = nilai.get("laba", 0)
         aset_lancar = nilai.get("aset_lancar", 0); liab_lancar = nilai.get("liabilitas_lancar", 0)
@@ -871,14 +1048,72 @@ def page_financial_analysis():
     entity_type = c2.selectbox("Jenis Entitas", ["Perusahaan Swasta / Tbk", "Pemerintahan / BLU"])
     if uploaded_fin:
         try:
-            df_fin = safe_read_dataframe(uploaded_fin, header_row=0)
+            fin_sheets = read_excel_sheets(uploaded_fin)
+            fin_sheet_names = list(fin_sheets.keys())
+            if len(fin_sheet_names) > 1:
+                best_s_idx = max(range(len(fin_sheet_names)), key=lambda i: len(fin_sheets[fin_sheet_names[i]]))
+                chosen_fin_sheet = st.selectbox("Pilih Sheet Laporan Keuangan", fin_sheet_names, index=best_s_idx, key="fin_sheet_select")
+                raw_fin = fin_sheets[chosen_fin_sheet]
+            else:
+                chosen_fin_sheet = fin_sheet_names[0]
+                raw_fin = fin_sheets[chosen_fin_sheet]
         except Exception as e:
             st.error(f"❌ Gagal membaca file: {str(e)}")
             st.stop()
-        st.success("✨ File berhasil dibaca.")
+
+        fin_sig = f"{uploaded_fin.name}_{chosen_fin_sheet}_{raw_fin.shape}"
+        fin_header_guess = _detect_fin_header_row(raw_fin)
+        fin_header_row = st.number_input(
+            "Baris header kolom laporan (mulai dari 0)",
+            min_value=0,
+            max_value=max(0, len(raw_fin) - 1),
+            value=int(fin_header_guess),
+            key=f"fin_header_{fin_sig}"
+        )
+        fin_headers = _clean_headers(raw_fin.iloc[int(fin_header_row)].tolist())
+        df_fin = raw_fin.iloc[int(fin_header_row) + 1:].copy()
+        df_fin.columns = fin_headers
+        df_fin = df_fin.dropna(how="all").reset_index(drop=True)
+
+        det_fin = _detect_fin_columns(df_fin)
+        all_fin_cols = list(df_fin.columns)
+        with st.expander("⚙️ Pemetaan Kolom Laporan Keuangan (Otomatis — Klik untuk Koreksi)", expanded=False):
+            mc1, mc2, mc3 = st.columns(3)
+            fin_name_col = mc1.selectbox(
+                "Kolom Uraian / Nama Akun",
+                all_fin_cols,
+                index=all_fin_cols.index(det_fin["name_col"]) if det_fin["name_col"] in all_fin_cols else 0,
+                key=f"fin_name_{fin_sig}_{fin_header_row}"
+            )
+            fin_real_col = mc2.selectbox(
+                "Kolom Realisasi / Nilai Utama",
+                all_fin_cols,
+                index=all_fin_cols.index(det_fin["real_col"]) if det_fin["real_col"] in all_fin_cols else 0,
+                key=f"fin_real_{fin_sig}_{fin_header_row}"
+            )
+            ang_options = ["(Tidak ada)"] + all_fin_cols
+            fin_ang_choice = mc3.selectbox(
+                "Kolom Anggaran / Pembanding",
+                ang_options,
+                index=(all_fin_cols.index(det_fin["ang_col"]) + 1) if det_fin["ang_col"] in all_fin_cols else 0,
+                key=f"fin_ang_{fin_sig}_{fin_header_row}"
+            )
+            fin_ang_col = None if fin_ang_choice == "(Tidak ada)" else fin_ang_choice
+
+        with st.expander(f"👁️ Pratinjau Data Laporan Terbaca ({len(df_fin)} baris)", expanded=False):
+            st.dataframe(df_fin.head(30), use_container_width=True)
+
+        st.success(f"✨ File berhasil dibaca ({len(df_fin)} baris). Kolom Uraian: **{fin_name_col}** | Kolom Nilai: **{fin_real_col}**.")
         if st.button("📊 ANALISIS KEUANGAN OTOMATIS", use_container_width=True):
             with st.spinner("Menghitung rasio..."):
-                nilai_utama = auto_extract_financials(df_fin, entity_type)
+                nilai_utama = auto_extract_financials(
+                    df_fin,
+                    entity_type,
+                    name_col=fin_name_col,
+                    real_col=fin_real_col,
+                    ang_col=fin_ang_col,
+                    prev_col=fin_ang_col
+                )
                 rasio = hitung_rasio_dari_nilai(nilai_utama, entity_type)
                 st.session_state['fin_results'] = {"rasio": rasio, "nilai": nilai_utama, "entity_type": entity_type}
     if 'fin_results' in st.session_state:
