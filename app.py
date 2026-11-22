@@ -2831,7 +2831,7 @@ def page_landing():
 
     st.markdown("""
     <div class="finora-hero-card">
-        <div class="finora-hero-badge">FINORA AI • Financial, Audit & Cash Flow Intelligence</div>
+        <div class="finora-hero-badge">FINORA • Financial, Audit & Cash Flow Intelligence</div>
         <h1 class="finora-hero-title">FINORA AI</h1>
         <p class="finora-hero-subtitle">Platform cerdas terpadu untuk <b>mendeteksi anomali transaksi (Audit)</b>, menyusun <b>Kertas Kerja Audit (KKA)</b>, mengevaluasi <b>Kesehatan Keuangan Perusahaan Swasta/Tbk & Sektor Publik/BLU</b>, menganalisis <b>Arus Kas (PSAK 207)</b>, serta belajar melalui <b>75 materi FINORA Study</b> dan <b>Gemini AI</b>.</p>
         <div class="finora-kpi-strip">
