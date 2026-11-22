@@ -2697,8 +2697,12 @@ def page_learning_center():
             all_tracks["Analisis Arus Kas"]
         )
 
+def _go_to_nav(target_nav):
+    st.session_state.selected_nav = target_nav
+    st.session_state.nav_radio = target_nav
+
 def page_dashboard():
-    finora_header("Dashboard", "Ringkasan seluruh aktivitas FINORA AI")
+    finora_header("Dashboard", "Ringkasan aktivitas & pusat akses cepat seluruh fitur FINORA AI")
     conn = get_conn()
     t_files = pd.read_sql_query("SELECT COUNT(*) c FROM files", conn).iloc[0]['c']
     t_analyses = pd.read_sql_query("SELECT COUNT(*) c FROM analyses", conn).iloc[0]['c']
@@ -2707,30 +2711,83 @@ def page_dashboard():
     conn.close()
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📁 File Dianalisis", t_files); c2.metric("📊 Analisis Dilakukan", t_analyses); c3.metric("⚠️ Total Temuan", t_findings); c4.metric("🔴 Risiko Tinggi", h_risk)
+
+    st.markdown("---")
+    st.subheader("🚀 Pilih Fitur Analisis & Pembelajaran")
+    st.caption("Klik tombol pada kartu fitur di bawah ini untuk langsung masuk ke modul yang diinginkan:")
+
+    features = [
+        {
+            "icon": "🔎",
+            "title": "Audit Profesional",
+            "desc": "Deteksi otomatis anomali transaksi (duplikasi, transaksi weekend, overbudget, outlier IQR, kata kunci mencurigakan) serta cetak Kertas Kerja Audit (PDF & Excel) + AI Audit Insights.",
+            "btn": "Buka Audit Profesional →",
+            "target": "Audit Profesional",
+        },
+        {
+            "icon": "📈",
+            "title": "Analisis Keuangan",
+            "desc": "Evaluasi laporan keuangan Perusahaan Swasta/Tbk maupun Pemerintahan/BLU (APBD/LRA), hitung rasio likuiditas, profitabilitas, solvabilitas, efisiensi, dan AI Financial Advisor.",
+            "btn": "Buka Analisis Keuangan →",
+            "target": "Analisis Keuangan",
+        },
+        {
+            "icon": "💧",
+            "title": "Analisis Arus Kas",
+            "desc": "Analisis arus kas berbasis PSAK 207 (Operasi, Investasi, Pendanaan) maupun mutasi transaksi bank, lengkap dengan Free Cash Flow, rasio kas, tren, risiko, dan AI Insights.",
+            "btn": "Buka Analisis Arus Kas →",
+            "target": "Analisis Arus Kas",
+        },
+        {
+            "icon": "📚",
+            "title": "FINORA Study",
+            "desc": "Pusat pembelajaran terstruktur berisi 75 materi lengkap (25 materi Audit, 25 materi Analisis Keuangan, dan 25 materi Analisis Arus Kas) dari level Dasar hingga Lanjutan.",
+            "btn": "Buka FINORA Study →",
+            "target": "FINORA Study",
+        },
+    ]
+
+    row1 = st.columns(2)
+    for idx, feat in enumerate(features[:2]):
+        with row1[idx]:
+            st.markdown(f"""
+            <div class="insight-box" style="min-height: 175px; margin-bottom: 10px;">
+                <h4>{feat['icon']} {feat['title']}</h4>
+                <p>{feat['desc']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button(
+                feat["btn"],
+                key=f"dash_btn_{feat['target']}",
+                use_container_width=True,
+                on_click=_go_to_nav,
+                args=(feat["target"],)
+            )
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    row2 = st.columns(2)
+    for idx, feat in enumerate(features[2:]):
+        with row2[idx]:
+            st.markdown(f"""
+            <div class="insight-box" style="min-height: 175px; margin-bottom: 10px;">
+                <h4>{feat['icon']} {feat['title']}</h4>
+                <p>{feat['desc']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button(
+                feat["btn"],
+                key=f"dash_btn_{feat['target']}",
+                use_container_width=True,
+                on_click=_go_to_nav,
+                args=(feat["target"],)
+            )
+
     st.markdown("---")
     st.subheader("🕐 Analisis Terakhir")
     recent = fetch_analyses()
     if not recent.empty:
         recent['created_at'] = pd.to_datetime(recent['created_at']).dt.strftime("%Y-%m-%d %H:%M")
         st.dataframe(recent.head(5), use_container_width=True)
-
-def page_simpan():
-    finora_header("Pusat Laporan & Arsip", "Riwayat analisis dan Kertas Kerja Audit tersimpan")
-    df = fetch_analyses()
-    if df.empty:
-        st.info("Belum ada riwayat."); return
-    st.dataframe(df, use_container_width=True)
-    st.markdown("---")
-    aid = st.selectbox("Pilih ID Analisis untuk membuka KKA lengkap", df["id"].tolist())
-    if aid:
-        an = fetch_analysis_by_id(aid)
-        if an:
-            summary_data = json.loads(an["summary_json"])
-            entitas, periode, score = summary_data.get("entitas", "-"), summary_data.get("periode", "-"), summary_data.get("score", 0)
-            flagged_data = {k: pd.DataFrame(v) for k, v in summary_data.get("flagged_data", {}).items()}
-            findings_df = fetch_findings(aid)
-            findings_list = findings_df.to_dict("records")
-            render_audit_results(findings_list, flagged_data, an["filename"], entitas, periode, score)
 
 def page_landing():
     st.markdown("""<style>[data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none; }</style>""", unsafe_allow_html=True)
@@ -2766,20 +2823,31 @@ def main():
     if not st.session_state.app_started:
         page_landing()
     else:
+        nav_items = [
+            "Dashboard",
+            "Audit Profesional",
+            "Analisis Keuangan",
+            "Analisis Arus Kas",
+            "FINORA Study",
+        ]
+        if "selected_nav" not in st.session_state or st.session_state.selected_nav not in nav_items:
+            st.session_state.selected_nav = "Dashboard"
+        if "nav_radio" not in st.session_state or st.session_state.nav_radio not in nav_items:
+            st.session_state.nav_radio = st.session_state.selected_nav
+
         try:
             st.sidebar.image(LOGO_FILENAME, width=180)
         except:
             st.sidebar.markdown('<h1 style="color:#FF5C8B;text-align:center;">F</h1>', unsafe_allow_html=True)
         st.sidebar.markdown('<p style="text-align:center;font-size:12px;color:#7A1F3D;">Financial Intelligence<br>Platform</p>', unsafe_allow_html=True)
         st.sidebar.markdown("---")
-        nav = st.sidebar.radio("Navigasi", [
-            "Dashboard", 
-            "Audit Profesional", 
-            "Analisis Keuangan", 
-            "Analisis Arus Kas", 
-            "FINORA Study", 
-            "Simpan"
-        ])
+        nav = st.sidebar.radio(
+            "Navigasi",
+            nav_items,
+            key="nav_radio",
+            on_change=lambda: st.session_state.update({"selected_nav": st.session_state.nav_radio})
+        )
+        st.session_state.selected_nav = nav
         st.sidebar.markdown("---")
         if st.sidebar.button("🏠 Kembali ke Halaman Depan", use_container_width=True):
             st.session_state.app_started = False
@@ -2790,7 +2858,6 @@ def main():
         elif nav == "Analisis Keuangan": page_financial_analysis()
         elif nav == "Analisis Arus Kas": page_cash_flow()
         elif nav == "FINORA Study": page_learning_center()
-        elif nav == "Simpan": page_simpan()
 
 if __name__ == "__main__":
     main()
