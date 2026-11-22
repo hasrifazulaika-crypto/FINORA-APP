@@ -2704,92 +2704,73 @@ def _go_to_nav(target_nav):
 def page_dashboard():
     finora_header("Dashboard", "Pusat akses cepat seluruh fitur analisis & pembelajaran FINORA AI")
     st.subheader("🚀 Pilih Fitur Analisis & Pembelajaran")
-    st.caption("Klik langsung pada kartu fitur di bawah ini untuk masuk ke modul yang diinginkan:")
-
-    st.markdown("""
-    <style>
-    .dash-unified-wrap .stButton > button {
-        background: linear-gradient(135deg, #FFFFFF 0%, #FFF7FA 100%) !important;
-        color: #2D1B24 !important;
-        border: 1.5px solid #F4B8C8 !important;
-        border-left: 6px solid #FF5C8B !important;
-        border-radius: 16px !important;
-        padding: 18px 20px !important;
-        text-align: left !important;
-        box-shadow: 0 4px 14px rgba(122, 31, 61, 0.07) !important;
-        transition: all 0.2s ease !important;
-        min-height: 168px !important;
-        height: auto !important;
-        white-space: normal !important;
-        word-break: break-word !important;
-        display: flex !important;
-        align-items: flex-start !important;
-        justify-content: flex-start !important;
-    }
-    .dash-unified-wrap .stButton > button:hover {
-        background: linear-gradient(135deg, #FFF0F5 0%, #FFF8F0 100%) !important;
-        border-color: #FF5C8B !important;
-        transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(255, 92, 139, 0.18) !important;
-    }
-    .dash-unified-wrap .stButton > button > div {
-        width: 100% !important;
-        text-align: left !important;
-    }
-    .dash-unified-wrap .stButton > button p {
-        text-align: left !important;
-        margin: 0 !important;
-        font-size: 13.5px !important;
-        font-weight: 400 !important;
-        line-height: 1.55 !important;
-        color: #33222A !important;
-        white-space: normal !important;
-    }
-    .dash-unified-wrap .stButton > button p strong {
-        display: block !important;
-        font-size: 17.5px !important;
-        font-weight: 800 !important;
-        color: #7A1F3D !important;
-        margin-bottom: 8px !important;
-        line-height: 1.3 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.caption("Klik tombol pada kartu fitur di bawah ini untuk langsung masuk ke modul yang diinginkan:")
 
     features = [
         {
-            "label": "**🔎 Audit Profesional**\nDeteksi otomatis anomali transaksi (duplikasi, transaksi weekend, overbudget, outlier IQR, kata kunci mencurigakan) serta cetak Kertas Kerja Audit (PDF & Excel) + AI Audit Insights.",
+            "icon": "🔎",
+            "title": "Audit Profesional",
+            "desc": "Deteksi otomatis anomali transaksi (duplikasi, transaksi weekend, overbudget, outlier IQR, kata kunci mencurigakan) serta cetak Kertas Kerja Audit (PDF & Excel) + AI Audit Insights.",
+            "btn": "Buka Audit Profesional →",
             "target": "Audit Profesional",
         },
         {
-            "label": "**📈 Analisis Keuangan**\nEvaluasi laporan keuangan Perusahaan Swasta/Tbk maupun Pemerintahan/BLU (APBD/LRA), hitung rasio likuiditas, profitabilitas, solvabilitas, efisiensi, dan AI Financial Advisor.",
+            "icon": "📈",
+            "title": "Analisis Keuangan",
+            "desc": "Evaluasi laporan keuangan Perusahaan Swasta/Tbk maupun Pemerintahan/BLU (APBD/LRA), hitung rasio likuiditas, profitabilitas, solvabilitas, efisiensi, dan AI Financial Advisor.",
+            "btn": "Buka Analisis Keuangan →",
             "target": "Analisis Keuangan",
         },
         {
-            "label": "**💧 Analisis Arus Kas**\nAnalisis arus kas berbasis PSAK 207 (Operasi, Investasi, Pendanaan) maupun mutasi transaksi bank, lengkap dengan Free Cash Flow, rasio kas, tren, risiko, dan AI Insights.",
+            "icon": "💧",
+            "title": "Analisis Arus Kas",
+            "desc": "Analisis arus kas berbasis PSAK 207 (Operasi, Investasi, Pendanaan) maupun mutasi transaksi bank, lengkap dengan Free Cash Flow, rasio kas, tren, risiko, dan AI Insights.",
+            "btn": "Buka Analisis Arus Kas →",
             "target": "Analisis Arus Kas",
         },
         {
-            "label": "**📚 FINORA Study**\nPusat pembelajaran terstruktur berisi 75 materi lengkap (25 materi Audit, 25 materi Analisis Keuangan, dan 25 materi Analisis Arus Kas) dari level Dasar hingga Lanjutan.",
+            "icon": "📚",
+            "title": "FINORA Study",
+            "desc": "Pusat pembelajaran terstruktur berisi 75 materi lengkap (25 materi Audit, 25 materi Analisis Keuangan, dan 25 materi Analisis Arus Kas) dari level Dasar hingga Lanjutan.",
+            "btn": "Buka FINORA Study →",
             "target": "FINORA Study",
         },
     ]
 
-    for row_start in (0, 2):
-        cols = st.columns(2)
-        for idx, feat in enumerate(features[row_start:row_start + 2]):
-            with cols[idx]:
-                st.markdown('<div class="dash-unified-wrap">', unsafe_allow_html=True)
-                st.button(
-                    feat["label"],
-                    key=f"dash_btn_{feat['target']}",
-                    use_container_width=True,
-                    on_click=_go_to_nav,
-                    args=(feat["target"],)
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-        if row_start == 0:
-            st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+    row1 = st.columns(2)
+    for idx, feat in enumerate(features[:2]):
+        with row1[idx]:
+            st.markdown(f"""
+            <div class="insight-box" style="min-height: 175px; margin-bottom: 10px;">
+                <h4>{feat['icon']} {feat['title']}</h4>
+                <p>{feat['desc']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button(
+                feat["btn"],
+                key=f"dash_btn_{feat['target']}",
+                use_container_width=True,
+                on_click=_go_to_nav,
+                args=(feat["target"],)
+            )
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    row2 = st.columns(2)
+    for idx, feat in enumerate(features[2:]):
+        with row2[idx]:
+            st.markdown(f"""
+            <div class="insight-box" style="min-height: 175px; margin-bottom: 10px;">
+                <h4>{feat['icon']} {feat['title']}</h4>
+                <p>{feat['desc']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button(
+                feat["btn"],
+                key=f"dash_btn_{feat['target']}",
+                use_container_width=True,
+                on_click=_go_to_nav,
+                args=(feat["target"],)
+            )
 
     st.markdown("---")
     st.subheader("🕐 Analisis Terakhir")
