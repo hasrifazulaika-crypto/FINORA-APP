@@ -262,19 +262,143 @@ def get_gemini_client():
     if not api_key: return None
     return genai.Client(api_key=api_key)
 
+def _get_candidate_gemini_models(client):
+    """Mengembalikan urutan model Gemini aktif yang tersedia (mendukung Gemini 3.x / 2.5 / fallback otomatis)."""
+    preferred = [
+        "gemini-3.0-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+    ]
+    available = []
+    try:
+        for m in client.models.list():
+            m_name = getattr(m, "name", "") or ""
+            if m_name.startswith("models/"):
+                m_name = m_name.replace("models/", "", 1)
+            methods = getattr(m, "supported_generation_methods", None) or []
+            if "gemini" in m_name.lower() and (not methods or "generateContent" in methods):
+                available.append(m_name)
+    except Exception:
+        pass
+    ordered = []
+    for p in preferred:
+        if not available or p in available:
+            ordered.append(p)
+    for a in available:
+        if any(k in a.lower() for k in ["flash", "pro"]) and "embedding" not in a.lower() and a not in ordered:
+            ordered.append(a)
+    return ordered if ordered else ["gemini-2.5-flash", "gemini-2.0-flash"]
+
 def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profesional"):
     try:
         client = get_gemini_client()
         if client is None:
-            yield "⚠️ API Key Gemini belum diatur di Secrets."
+            yield "⚠️ API Key Gemini belum diatur di Secrets (`GEMINI_API_KEY`)."
             return
-        model_id = "gemini-2.0-flash"
-        full_prompt = f"Kamu adalah FINORA AI, {system_role}.\nJawab pertanyaan berdasarkan konteks data yang diberikan secara ringkas, padat, dan profesional.\n\n[KONTEKS DATA]\n{audit_context}\n\n[PERTANYAAN / INSTRUKSI]\n{prompt}"
-        response_stream = client.models.generate_content_stream(model=model_id, contents=full_prompt)
-        for chunk in response_stream:
-            if getattr(chunk, "text", None): yield chunk.text
+        full_prompt = (
+            f"Kamu adalah FINORA AI, {system_role}.\n"
+            f"Jawab pertanyaan berdasarkan konteks data yang diberikan secara ringkas, padat, terstruktur, dan profesional dalam Bahasa Indonesia.\n"
+            f"Bedakan antara fakta angka dari data dan interpretasi analisis. Jangan mengarang angka yang tidak ada di konteks.\n\n"
+            f"[KONTEKS DATA]\n{audit_context}\n\n"
+            f"[PERTANYAAN / INSTRUKSI]\n{prompt}"
+        )
+        candidate_models = _get_candidate_gemini_models(client)
+        last_err = None
+        for model_id in candidate_models:
+            try:
+                response_stream = client.models.generate_content_stream(model=model_id, contents=full_prompt)
+                has_output = False
+                for chunk in response_stream:
+                    txt = getattr(chunk, "text", None)
+                    if txt:
+                        has_output = True
+                        yield txt
+                if has_output:
+                    return
+            except Exception as model_err:
+                last_err = model_err
+                err_str = str(model_err)
+                # Jika model tidak ditemukan (404) atau tidak didukung, lanjut otomatis ke model berikutnya
+                if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower() or "not supported" in err_str.lower():
+                    continue
+                raise model_err
+        yield f"⚠️ Tidak ada model Gemini yang merespons. Detail terakhir: {str(last_err)}"
     except Exception as e:
-        yield f"\n\n⚠️ Terjadi kesalahan: {str(e)}"
+        yield f"\n\n⚠️ Terjadi kesalahan saat menghubungi Gemini AI: {str(e)}"
+
+def render_ai_guided_panel(panel_key, context_text, system_role, auto_prompt, preset_questions, panel_title="🤖 Analisis Otomatis & Tanya Jawab Terarah (Gemini AI)"):
+    """Menampilkan analisis otomatis Gemini AI terlebih dahulu, lalu menyediakan pilihan pertanyaan terarah + input bebas."""
+    st.markdown(f"### {panel_title}")
+    st.caption("Hasil analisis awal dibuat otomatis oleh Gemini AI berdasarkan data di atas. Selanjutnya Anda dapat memilih pertanyaan terarah di bawah ini.")
+
+    sig = hashlib.md5(f"{panel_key}_{context_text}".encode("utf-8")).hexdigest()[:12]
+    auto_state_key = f"ai_auto_summary_{panel_key}"
+    sig_state_key = f"ai_auto_sig_{panel_key}"
+    hist_state_key = f"ai_guided_hist_{panel_key}"
+
+    if hist_state_key not in st.session_state or st.session_state.get(sig_state_key) != sig:
+        st.session_state[hist_state_key] = []
+        st.session_state[sig_state_key] = sig
+        st.session_state.pop(auto_state_key, None)
+
+    col_hdr1, col_hdr2 = st.columns([3, 1])
+    with col_hdr1:
+        st.markdown("#### 1. Ringkasan Analisis Otomatis Gemini AI")
+    with col_hdr2:
+        if st.button("🔄 Analisis Ulang", key=f"regen_{panel_key}_{sig}", use_container_width=True):
+            st.session_state.pop(auto_state_key, None)
+            st.rerun()
+
+    if auto_state_key not in st.session_state or not st.session_state[auto_state_key]:
+        with st.chat_message("assistant"):
+            generated_summary = st.write_stream(ask_gemini_stream(auto_prompt, context_text, system_role=system_role))
+        if generated_summary:
+            st.session_state[auto_state_key] = generated_summary
+    else:
+        with st.chat_message("assistant"):
+            st.markdown(st.session_state[auto_state_key])
+
+    st.markdown("---")
+    st.markdown("#### 2. Pilih Pertanyaan Terarah (Tidak Acak)")
+    st.caption("Klik salah satu pertanyaan terarah di bawah ini untuk pendalaman analisis sesuai hasil di atas:")
+
+    selected_preset = None
+    cols_q = st.columns(2)
+    for idx_q, q_text in enumerate(preset_questions):
+        with cols_q[idx_q % 2]:
+            if st.button(f"💬 {q_text}", key=f"preset_{panel_key}_{sig}_{idx_q}", use_container_width=True):
+                selected_preset = q_text
+
+    with st.expander("✍️ Atau tulis pertanyaan spesifik Anda sendiri (Opsional)", expanded=False):
+        with st.form(key=f"custom_q_form_{panel_key}_{sig}", clear_on_submit=True):
+            custom_q = st.text_input("Pertanyaan spesifik terkait hasil analisis:", key=f"custom_input_{panel_key}_{sig}")
+            submitted_custom = st.form_submit_button("Kirim Pertanyaan Spesifik", use_container_width=True)
+            if submitted_custom and custom_q.strip():
+                selected_preset = custom_q.strip()
+
+    if st.session_state[hist_state_key]:
+        st.markdown("#### 3. Hasil Tanya Jawab Terarah")
+        for msg in st.session_state[hist_state_key]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+        if st.button("🗑️ Bersihkan Riwayat Tanya Jawab", key=f"clear_{panel_key}_{sig}"):
+            st.session_state[hist_state_key] = []
+            st.rerun()
+
+    if selected_preset:
+        st.session_state[hist_state_key].append({"role": "user", "content": selected_preset})
+        with st.chat_message("user"):
+            st.markdown(selected_preset)
+        enriched_context = (
+            f"{context_text}\n\n"
+            f"[RINGKASAN ANALISIS AWAL YANG SUDAH DITAMPILKAN]\n{st.session_state.get(auto_state_key, '')}"
+        )
+        with st.chat_message("assistant"):
+            ans = st.write_stream(ask_gemini_stream(selected_preset, enriched_context, system_role=system_role))
+        st.session_state[hist_state_key].append({"role": "assistant", "content": ans})
+        st.rerun()
 
 # ============================================================
 # AUDIT ENGINE
@@ -638,18 +762,37 @@ def render_audit_results(all_findings, flagged_data, filename, entitas, periode,
                 st.plotly_chart(px.bar(mod_df, x="count", y="module", orientation='h', color_discrete_sequence=["#FF5C8B"]), use_container_width=True)
         else: st.info("Belum ada data.")
     with tab_ai:
-        st.markdown("### 🤖 Tanya FINORA AI")
-        context_text = f"Entitas: {entitas} | Skor: {score}/100\nTemuan:\n" + "".join([f"- [{f['risk_level']}] {f['module']} ({f['title']})\n" for f in all_findings])
-        if "ai_chat_history" not in st.session_state: st.session_state.ai_chat_history = []
-        for msg in st.session_state.ai_chat_history:
-            with st.chat_message(msg["role"]): st.markdown(msg["content"])
-        with st.form(key="ai_chat_form", clear_on_submit=True):
-            prompt = st.text_input("Tulis pertanyaan audit Anda...")
-            if st.form_submit_button("Kirim ke AI", use_container_width=True) and prompt:
-                st.session_state.ai_chat_history.append({"role": "user", "content": prompt})
-                with st.chat_message("assistant"): response = st.write_stream(ask_gemini_stream(prompt, context_text))
-                st.session_state.ai_chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
+        temuan_detail_lines = []
+        for idx_f, f in enumerate(all_findings, 1):
+            temuan_detail_lines.append(
+                f"- F-{idx_f:02d} [{f['risk_level']}] {f['module']}: {f['title']} | Detail: {f['detail']} | Rekomendasi: {f['recommendation']}"
+            )
+        context_text = (
+            f"Entitas: {entitas if entitas else '-'} | Periode: {periode if periode else '-'} | File: {filename}\n"
+            f"Skor Risiko Audit: {score}/100 | Total Temuan: {len(all_findings)}\n"
+            f"Daftar Temuan:\n" + ("\n".join(temuan_detail_lines) if temuan_detail_lines else "- Tidak ada temuan anomali.")
+        )
+        auto_audit_prompt = (
+            "Berikan ringkasan hasil audit secara profesional berdasarkan daftar temuan dan skor risiko di atas: "
+            "(1) Kesimpulan tingkat risiko keseluruhan, (2) Temuan paling kritis yang wajib diprioritaskan, "
+            "(3) Potensi dampak terhadap kewajaran laporan keuangan, dan (4) Langkah tindak lanjut awal."
+        )
+        audit_preset_questions = [
+            "Temuan mana yang risikonya paling tinggi dan harus diperiksa lebih dulu?",
+            "Bukti fisik atau dokumen apa saja yang harus diminta untuk memverifikasi temuan ini?",
+            "Bagaimana dampak temuan ini terhadap keandalan laporan keuangan & pengendalian intern?",
+            "Buatkan draf poin catatan manajemen (Management Letter) dari hasil temuan di atas.",
+            "Apa kemungkinan penyebab (root cause) dari anomali yang terdeteksi?",
+            "Susun rencana tindak lanjut (action plan) dan tenggat perbaikan untuk entitas.",
+        ]
+        render_ai_guided_panel(
+            panel_key=f"audit_{filename}_{entitas}_{score}",
+            context_text=context_text,
+            system_role="Asisten Auditor Profesional & Spesialis Pengendalian Intern",
+            auto_prompt=auto_audit_prompt,
+            preset_questions=audit_preset_questions,
+            panel_title="🤖 AI Audit Insights & Tanya Jawab Terarah"
+        )
 
 def page_audit():
     finora_header("Audit Profesional", "Sistem deteksi otomatis anomali transaksi")
@@ -784,16 +927,59 @@ def page_financial_analysis():
                 fig.update_layout(barmode='group', title="Pendapatan vs Laba Bersih", height=400)
                 st.plotly_chart(fig, use_container_width=True)
         with tab_ai_advisor:
-            st.markdown("### 🤖 AI Financial Advisor")
-            if st.button("Buat Laporan Analisis AI", use_container_width=True):
-                if is_pemda:
-                    context_ai = f"Entitas: Pemerintahan / BLU\nRealisasi Pendapatan: Rp {nilai.get('real_pendapatan', 0):,.0f}, Anggaran: Rp {nilai.get('ang_pendapatan', 0):,.0f}\nRealisasi Belanja: Rp {nilai.get('real_belanja', 0):,.0f}, Anggaran: Rp {nilai.get('ang_belanja', 0):,.0f}\nSurplus/Defisit: Rp {nilai.get('surplus', 0):,.0f}\nPAD: Rp {nilai.get('pad', 0):,.0f}\nRasio Efektivitas: {rasio.get('Efektivitas Pendapatan (%)', 0)}%, Efisiensi: {rasio.get('Efisiensi Belanja (%)', 0)}%, Kemandirian: {rasio.get('Kemandirian Daerah (%)', 0)}%"
-                    prompt_ai = "Sebagai Konsultan Keuangan Daerah, berikan analisis atas APBD ini (Kesehatan Fiskal, Kemandirian, dan Rekomendasi Optimalisasi Pendapatan/Belanja)."
-                else:
-                    context_ai = f"Entitas: Perusahaan\nPendapatan: Rp {nilai.get('pendapatan', 0):,.0f}, Laba: Rp {nilai.get('laba', 0):,.0f}\nTotal Aset: Rp {nilai.get('total_aset', 0):,.0f}, Ekuitas: Rp {nilai.get('ekuitas', 0):,.0f}\nRasio: Current Ratio {rasio.get('Current Ratio (x)', 0)}x, NPM {rasio.get('Net Profit Margin (%)', 0)}%, ROA {rasio.get('ROA (%)', 0)}%, ROE {rasio.get('ROE (%)', 0)}%"
-                    prompt_ai = "Sebagai Analis Keuangan Senior, berikan analisis kesehatan finansial perusahaan dan rekomendasi strategis ke depan."
-                with st.chat_message("assistant"): st.write_stream(ask_gemini_stream(prompt_ai, context_ai, system_role="Konsultan Keuangan & Fiskal Ahli"))
-                st.success("Analisis AI Selesai.")
+            if is_pemda:
+                context_ai = (
+                    f"Entitas: Pemerintahan / BLU\n"
+                    f"Realisasi Pendapatan: Rp {nilai.get('real_pendapatan', 0):,.0f} | Anggaran Pendapatan: Rp {nilai.get('ang_pendapatan', 0):,.0f}\n"
+                    f"Realisasi Belanja: Rp {nilai.get('real_belanja', 0):,.0f} | Anggaran Belanja: Rp {nilai.get('ang_belanja', 0):,.0f}\n"
+                    f"Surplus/Defisit: Rp {nilai.get('surplus', 0):,.0f} | Pendapatan Asli Daerah (PAD): Rp {nilai.get('pad', 0):,.0f}\n"
+                    f"Rasio Efektivitas Pendapatan: {rasio.get('Efektivitas Pendapatan (%)', 0)}%\n"
+                    f"Rasio Efisiensi Belanja: {rasio.get('Efisiensi Belanja (%)', 0)}%\n"
+                    f"Rasio Kemandirian Daerah: {rasio.get('Kemandirian Daerah (%)', 0)}%"
+                )
+                prompt_ai = (
+                    "Sebagai Konsultan Keuangan Daerah & Sektor Publik, berikan analisis otomatis atas laporan APBD/BLU ini: "
+                    "(1) Evaluasi kesehatan fiskal & surplus/defisit, (2) Analisis efektivitas pendapatan & efisiensi belanja, "
+                    "(3) Tingkat kemandirian fiskal, serta (4) Rekomendasi optimalisasi anggaran."
+                )
+                fin_presets = [
+                    "Bagaimana evaluasi efektivitas pemungutan pendapatan dibanding target anggarannya?",
+                    "Apakah realisasi belanja sudah efisien dan seimbang dengan capaian pendapatan?",
+                    "Strategi apa yang paling realistis untuk meningkatkan kemandirian fiskal / PAD?",
+                    "Apa risiko fiskal utama jika tren realisasi anggaran ini berlanjut?",
+                    "Bagaimana rekomendasi pengelolaan surplus/defisit anggaran untuk periode berikutnya?",
+                    "Susun ringkasan eksekutif laporan kinerja keuangan ini untuk pimpinan instansi.",
+                ]
+            else:
+                context_ai = (
+                    f"Entitas: Perusahaan Swasta / Tbk\n"
+                    f"Pendapatan: Rp {nilai.get('pendapatan', 0):,.0f} | Laba Bersih: Rp {nilai.get('laba', 0):,.0f}\n"
+                    f"Total Aset: Rp {nilai.get('total_aset', 0):,.0f} | Total Liabilitas: Rp {nilai.get('total_liabilitas', 0):,.0f} | Ekuitas: Rp {nilai.get('ekuitas', 0):,.0f}\n"
+                    f"Aset Lancar: Rp {nilai.get('aset_lancar', 0):,.0f} | Liabilitas Lancar: Rp {nilai.get('liabilitas_lancar', 0):,.0f}\n"
+                    f"Rasio: Current Ratio {rasio.get('Current Ratio (x)', 0)}x, NPM {rasio.get('Net Profit Margin (%)', 0)}%, "
+                    f"ROA {rasio.get('ROA (%)', 0)}%, ROE {rasio.get('ROE (%)', 0)}%, Debt to Equity {rasio.get('Debt to Equity (x)', 0)}x"
+                )
+                prompt_ai = (
+                    "Sebagai Analis Keuangan Senior, berikan analisis otomatis kesehatan finansial perusahaan ini meliputi: "
+                    "(1) Likuiditas jangka pendek, (2) Profitabilitas & efisiensi aset/modal, (3) Solvabilitas/struktur utang, "
+                    "serta (4) Rekomendasi strategis peningkatan kinerja keuangan."
+                )
+                fin_presets = [
+                    "Bagaimana kondisi likuiditas perusahaan (Current Ratio) dan kemampuan bayar utang lancar?",
+                    "Apakah margin laba (NPM), ROA, dan ROE sudah sehat atau perlu efisiensi biaya?",
+                    "Bagaimana risiko struktur utang (Debt to Equity) terhadap ketahanan finansial perusahaan?",
+                    "Rasio mana yang paling lemah dan langkah konkret apa untuk memperbaikinya?",
+                    "Apakah perusahaan berada pada posisi yang aman untuk melakukan ekspansi usaha?",
+                    "Buatkan ringkasan eksekutif analisis kesehatan keuangan ini untuk manajemen.",
+                ]
+            render_ai_guided_panel(
+                panel_key=f"fin_advisor_{res['entity_type']}",
+                context_text=context_ai,
+                system_role="Konsultan Keuangan & Fiskal Ahli",
+                auto_prompt=prompt_ai,
+                preset_questions=fin_presets,
+                panel_title="🤖 AI Financial Advisor & Tanya Jawab Terarah"
+            )
 
 def page_cash_flow():
     """Analisis arus kas berbasis laporan arus kas (PSAK 207) atau transaksi kas."""
@@ -1526,28 +1712,45 @@ def page_cash_flow():
                 else:
                     st.success("Tidak ditemukan indikator risiko dasar dari pos ringkasan yang tersedia. Ini bukan jaminan tidak ada salah saji.")
             with t5:
-                if st.button("🤖 Buat AI Financial Insights", key="ai_cf_statement"):
-                    context_lines = [f"Periode Dianalisis: {', '.join(str(p) for p in periods)}"]
-                    for p in periods:
-                        res_p = saved["results"][p]
-                        context_lines.append(
-                            f"- Periode {p}: Operasi={res_p['totals']['operasi']:,.0f}, "
-                            f"Investasi={res_p['totals']['investasi']:,.0f}, "
-                            f"Pendanaan={res_p['totals']['pendanaan']:,.0f}, "
-                            f"Perubahan Neto={res_p['net_change']:,.0f}, "
-                            f"Saldo Awal={res_p['opening_cash']}, Saldo Akhir={res_p['closing_cash']}, "
-                            f"FCF={res_p['fcf']:,.0f}"
-                        )
-                    context = "\n".join(context_lines)
-                    prompt = (
-                        "Analisis arus kas secara profesional untuk seluruh periode yang ditampilkan. "
-                        "Jelaskan sumber dan penggunaan kas, kualitas arus kas operasi, aktivitas investasi "
-                        "dan pendanaan, perbandingan antarperiode, risiko likuiditas, rekonsiliasi saldo, "
-                        "serta rekomendasi yang spesifik. Bedakan fakta angka dan interpretasi. "
-                        "Jangan menyimpulkan rasio yang datanya tidak tersedia."
+                context_lines = [f"File: {saved['filename']} | Periode Dianalisis: {', '.join(str(p) for p in periods)}"]
+                for p in periods:
+                    res_p = saved["results"][p]
+                    context_lines.append(
+                        f"- Periode {p}: Operasi={res_p['totals']['operasi']:,.0f}, "
+                        f"Investasi={res_p['totals']['investasi']:,.0f}, "
+                        f"Pendanaan={res_p['totals']['pendanaan']:,.0f}, "
+                        f"Perubahan Neto={res_p['net_change']:,.0f}, "
+                        f"Saldo Awal={res_p['opening_cash']}, Saldo Akhir={res_p['closing_cash']}, "
+                        f"FCF={res_p['fcf']:,.0f}"
                     )
-                    with st.chat_message("assistant"):
-                        st.write_stream(ask_gemini_stream(prompt, context, system_role="Analis Arus Kas dan Akuntansi Profesional"))
+                if ratios:
+                    context_lines.append("Rasio Arus Kas Terhitung:")
+                    for rk, rv in ratios.items():
+                        context_lines.append(f"  * {rk}: {rv}")
+                cf_stmt_context = "\n".join(context_lines)
+                cf_stmt_auto_prompt = (
+                    "Analisis arus kas secara profesional untuk seluruh periode yang ditampilkan. "
+                    "Jelaskan sumber dan penggunaan kas, kualitas arus kas operasi, aktivitas investasi "
+                    "dan pendanaan, perbandingan antarperiode, risiko likuiditas, rekonsiliasi saldo, "
+                    "serta rekomendasi yang spesifik. Bedakan fakta angka dan interpretasi. "
+                    "Jangan menyimpulkan rasio yang datanya tidak tersedia."
+                )
+                cf_stmt_presets = [
+                    "Bagaimana kualitas arus kas operasi dan kemampuannya membiayai operasional tanpa utang baru?",
+                    "Apakah pengeluaran investasi (CapEx) sudah sebanding dengan kas yang dihasilkan operasi?",
+                    "Bagaimana perbandingan kinerja arus kas antarperiode yang dianalisis?",
+                    "Apakah ada risiko likuiditas atau ketergantungan pada pendanaan eksternal?",
+                    "Jelaskan arti angka Free Cash Flow dan rasio arus kas yang terbentuk dari data ini.",
+                    "Berikan rekomendasi konkret untuk mengoptimalkan pengelolaan kas pada periode berikutnya.",
+                ]
+                render_ai_guided_panel(
+                    panel_key=f"cf_stmt_{saved['filename']}",
+                    context_text=cf_stmt_context,
+                    system_role="Analis Arus Kas dan Akuntansi Profesional (PSAK 207)",
+                    auto_prompt=cf_stmt_auto_prompt,
+                    preset_questions=cf_stmt_presets,
+                    panel_title="🧠 AI Cash Flow Insights & Tanya Jawab Terarah"
+                )
 
             summary = {
                 "Periode": ", ".join(str(p) for p in periods),
@@ -1799,25 +2002,39 @@ def page_cash_flow():
                 st.success("Tidak ditemukan indikator risiko dasar berdasarkan pengujian otomatis.")
             st.caption("Deteksi anomali adalah indikator untuk pemeriksaan lanjutan, bukan bukti kecurangan.")
         with tab_ai:
-            if st.button("🤖 Buat AI Financial Insights", key="ai_cf_transaction"):
-                context = (
-                    f"Kas masuk: {res['total_in']:,.0f}\nKas keluar: {res['total_out']:,.0f}\n"
-                    f"Saldo awal: {res['opening']:,.0f}\nSaldo akhir: {res['closing']:,.0f}\n"
-                    f"Arus kas operasi: {res['totals']['Operasi']:,.0f}\n"
-                    f"Arus kas investasi: {res['totals']['Investasi']:,.0f}\n"
-                    f"Arus kas pendanaan: {res['totals']['Pendanaan']:,.0f}\n"
-                    f"Free cash flow estimasi: {res['fcf']:,.0f}\n"
-                    f"Rata-rata pengeluaran operasi bulanan: {res['avg_operating_outflow']:,.0f}\n"
-                    f"Jumlah transaksi anomali: {len(res['anomalies'])}"
-                )
-                prompt = (
-                    "Buat analisis arus kas yang mencakup sumber dan penggunaan kas, "
-                    "kemampuan operasi menghasilkan kas, investasi, pendanaan, tren, risiko likuiditas, "
-                    "dan rekomendasi praktis. Sebutkan keterbatasan karena klasifikasi berasal dari kata kunci. "
-                    "Jangan membuat angka atau rasio yang tidak tersedia."
-                )
-                with st.chat_message("assistant"):
-                    st.write_stream(ask_gemini_stream(prompt, context, system_role="FINORA AI Cash Flow Analyst"))
+            cf_tx_context = (
+                f"File: {res['filename']} | Jumlah Periode Bulan: {res['months']}\n"
+                f"Kas masuk: {res['total_in']:,.0f} | Kas keluar: {res['total_out']:,.0f}\n"
+                f"Saldo awal: {res['opening']:,.0f} | Saldo akhir: {res['closing']:,.0f}\n"
+                f"Arus kas operasi: {res['totals']['Operasi']:,.0f}\n"
+                f"Arus kas investasi: {res['totals']['Investasi']:,.0f}\n"
+                f"Arus kas pendanaan: {res['totals']['Pendanaan']:,.0f}\n"
+                f"Free cash flow estimasi: {res['fcf']:,.0f}\n"
+                f"Rata-rata pengeluaran operasi bulanan: {res['avg_operating_outflow']:,.0f}\n"
+                f"Jumlah transaksi anomali pengeluaran (IQR): {len(res['anomalies'])}"
+            )
+            cf_tx_auto_prompt = (
+                "Buat analisis arus kas yang mencakup sumber dan penggunaan kas, "
+                "kemampuan operasi menghasilkan kas, investasi, pendanaan, tren, risiko likuiditas, "
+                "dan rekomendasi praktis. Sebutkan keterbatasan karena klasifikasi berasal dari kata kunci. "
+                "Jangan membuat angka atau rasio yang tidak tersedia."
+            )
+            cf_tx_presets = [
+                "Bagaimana pola arus kas masuk vs kas keluar bulanan dan apakah terjadi defisit kas?",
+                "Berapa lama ketahanan saldo kas akhir jika dibandingkan rata-rata pengeluaran operasi bulanan?",
+                "Apa yang perlu diperiksa dari transaksi pengeluaran anomali (outlier IQR) yang terdeteksi?",
+                "Apakah aktivitas operasi sudah mampu menopang pengeluaran investasi dan pendanaan?",
+                "Langkah efisiensi pengeluaran apa yang disarankan berdasarkan komposisi mutasi kas ini?",
+                "Pos transaksi mana yang perlu diverifikasi ulang klasifikasinya secara manual?",
+            ]
+            render_ai_guided_panel(
+                panel_key=f"cf_tx_{res['filename']}",
+                context_text=cf_tx_context,
+                system_role="FINORA AI Cash Flow Analyst",
+                auto_prompt=cf_tx_auto_prompt,
+                preset_questions=cf_tx_presets,
+                panel_title="🧠 AI Cash Flow Insights & Tanya Jawab Terarah"
+            )
 
         export_df = res["df"][["_tanggal", "_keterangan", "_aktivitas", "_kas_masuk", "_kas_keluar", "_net", "_saldo_berjalan"]].copy()
         summary = {
