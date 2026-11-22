@@ -286,10 +286,16 @@ def _get_candidate_gemini_models(client):
     for p in preferred:
         if not available or p in available:
             ordered.append(p)
+    blocked_keywords = ["image", "imagen", "veo", "audio", "tts", "live", "embedding", "aqa", "robotics"]
     for a in available:
-        if any(k in a.lower() for k in ["flash", "pro"]) and "embedding" not in a.lower() and a not in ordered:
+        al = a.lower()
+        if any(k in al for k in ["flash", "pro"]) and not any(bk in al for bk in blocked_keywords) and a not in ordered:
             ordered.append(a)
-    return ordered if ordered else ["gemini-2.5-flash", "gemini-2.0-flash"]
+    # Pastikan model teks standar selalu ada di depan meski list API mengembalikan model khusus
+    for text_default in ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]:
+        if text_default not in ordered:
+            ordered.append(text_default)
+    return ordered
 
 def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profesional"):
     try:
@@ -320,8 +326,14 @@ def ask_gemini_stream(prompt, audit_context, system_role="Asisten Auditor Profes
             except Exception as model_err:
                 last_err = model_err
                 err_str = str(model_err)
-                # Jika model tidak ditemukan (404) atau tidak didukung, lanjut otomatis ke model berikutnya
-                if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower() or "not supported" in err_str.lower():
+                # Jika model tidak ditemukan (404), tidak didukung, atau kuota model khusus limit 0 (429), lanjut ke model teks berikutnya
+                if (
+                    "404" in err_str
+                    or "NOT_FOUND" in err_str
+                    or "not found" in err_str.lower()
+                    or "not supported" in err_str.lower()
+                    or ("429" in err_str and "limit: 0" in err_str)
+                ):
                     continue
                 raise model_err
         yield f"⚠️ Tidak ada model Gemini yang merespons. Detail terakhir: {str(last_err)}"
