@@ -2779,33 +2779,346 @@ def page_dashboard():
         recent['created_at'] = pd.to_datetime(recent['created_at']).dt.strftime("%Y-%m-%d %H:%M")
         st.dataframe(recent.head(5), use_container_width=True)
 
+def _landing_go_to(target_nav):
+    st.session_state.app_started = True
+    st.session_state.selected_nav = target_nav
+    st.session_state.nav_radio = target_nav
+
 def page_landing():
-    st.markdown("""<style>[data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none; }</style>""", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    with col2:
-        if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, width=250)
-        else: st.markdown("<h1 style='text-align:center; font-size: 5rem;'>F</h1>", unsafe_allow_html=True)
     st.markdown("""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #FFF0F4 0%, #FFF5E8 100%); border-radius: 20px; margin-bottom: 40px; border: 2px solid #FF5C8B; box-shadow: 0 10px 30px rgba(255, 92, 139, 0.15);">
-        <h1 style="color: #7A1F3D; font-size: 3.5rem; margin-bottom: 15px; font-weight: 800;">FINORA AI</h1>
-        <p style="color: #2D1B24; font-size: 1.3rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
-            Platform Kecerdasan Finansial untuk mendeteksi anomali (Audit) dan menyusun <b>Kertas Kerja Audit (KKA)</b> serta <b>Analisis Laporan Keuangan</b> secara otomatis.
+    <style>
+    [data-testid="collapsedControl"], [data-testid="stSidebar"] { display: none !important; }
+    .stApp {
+        background: radial-gradient(circle at top center, #FFF9F2 0%, #FFF5E8 58%, #FFEBF1 100%) !important;
+        color: #2D1B24 !important;
+    }
+    .finora-hero-card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1.5px solid #F7BDD0;
+        border-radius: 24px;
+        padding: 28px 32px 30px 32px;
+        margin: 8px auto 26px auto;
+        max-width: 980px;
+        box-shadow: 0 14px 36px rgba(122, 31, 61, 0.08);
+        text-align: center;
+    }
+    .finora-hero-badge {
+        display: inline-block;
+        background: #FFE6EE;
+        color: #7A1F3D;
+        border: 1px solid #F5B5C9;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        padding: 5px 14px;
+        border-radius: 999px;
+        margin-bottom: 12px;
+    }
+    .finora-hero-title {
+        color: #7A1F3D !important;
+        font-size: 42px !important;
+        font-weight: 800 !important;
+        line-height: 1.15 !important;
+        margin: 0 0 10px 0 !important;
+        letter-spacing: -0.5px;
+    }
+    .finora-hero-subtitle {
+        color: #3A232E;
+        font-size: 16px;
+        line-height: 1.65;
+        max-width: 780px;
+        margin: 0 auto 18px auto;
+    }
+    .finora-kpi-strip {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 8px;
+    }
+    .finora-kpi-pill {
+        background: #FFF7F9;
+        border: 1px solid #F4CAD7;
+        border-radius: 12px;
+        padding: 8px 14px;
+        font-size: 12.5px;
+        font-weight: 700;
+        color: #7A1F3D;
+    }
+    .finora-section-head {
+        text-align: center;
+        margin: 10px auto 18px auto;
+        max-width: 820px;
+    }
+    .finora-section-head h2 {
+        color: #7A1F3D !important;
+        font-size: 26px !important;
+        font-weight: 800 !important;
+        margin: 0 0 6px 0 !important;
+    }
+    .finora-section-head p {
+        color: #5C434E;
+        font-size: 14px;
+        margin: 0;
+    }
+    .finora-feature-card {
+        background: #FFFFFF;
+        border: 1px solid #F4CAD7;
+        border-top: 4px solid #FF5C8B;
+        border-radius: 18px;
+        padding: 20px 20px 16px 20px;
+        box-shadow: 0 6px 20px rgba(122, 31, 61, 0.05);
+        min-height: 215px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .finora-feature-icon {
+        width: 44px;
+        height: 44px;
+        line-height: 44px;
+        text-align: center;
+        border-radius: 12px;
+        background: #FFF0F5;
+        border: 1px solid #F8C8D4;
+        font-size: 22px;
+        margin-bottom: 12px;
+    }
+    .finora-feature-title {
+        color: #7A1F3D;
+        font-size: 18px;
+        font-weight: 800;
+        margin: 0 0 8px 0;
+    }
+    .finora-feature-desc {
+        color: #46303A;
+        font-size: 13.5px;
+        line-height: 1.55;
+        margin: 0 0 12px 0;
+    }
+    .finora-feature-tags {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: #9A3B5B;
+    }
+    .finora-workflow-box {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid #F4CAD7;
+        border-radius: 18px;
+        padding: 18px 22px;
+        margin: 22px auto 24px auto;
+        max-width: 980px;
+    }
+    .finora-step-item {
+        background: #FFF9FB;
+        border: 1px solid #F7D6E0;
+        border-radius: 12px;
+        padding: 12px 14px;
+        height: 100%;
+    }
+    .finora-step-num {
+        font-size: 11.5px;
+        font-weight: 800;
+        color: #FF5C8B;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .finora-step-title {
+        font-size: 14px;
+        font-weight: 800;
+        color: #7A1F3D;
+        margin: 3px 0 4px 0;
+    }
+    .finora-step-desc {
+        font-size: 12.5px;
+        color: #4F3842;
+        line-height: 1.45;
+        margin: 0;
+    }
+    .finora-cta-btn > button {
+        background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%) !important;
+        color: #FFFFFF !important;
+        font-size: 16px !important;
+        font-weight: 800 !important;
+        padding: 15px 28px !important;
+        border-radius: 14px !important;
+        border: none !important;
+        box-shadow: 0 8px 22px rgba(122, 31, 61, 0.24) !important;
+        letter-spacing: 0.3px;
+    }
+    .finora-cta-btn > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 26px rgba(122, 31, 61, 0.32) !important;
+    }
+    .finora-footer-note {
+        text-align: center;
+        color: #7A5C68;
+        font-size: 12px;
+        margin-top: 14px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Logo terpusat dan presisi di bagian atas halaman depan
+    _, logo_col, _ = st.columns([1.6, 1.2, 1.6])
+    with logo_col:
+        if LOGO_B64:
+            st.markdown(
+                f"""
+                <div style="display:flex; justify-content:center; align-items:center; margin: 6px auto 12px auto;">
+                    <img src="data:image/png;base64,{LOGO_B64}" alt="FINORA AI Logo"
+                         style="width:168px; height:168px; object-fit:contain; border-radius:50%;
+                                background:#FFFFFF; border:3px solid #FF5C8B; padding:6px;
+                                box-shadow:0 10px 26px rgba(122,31,61,0.16); display:block;">
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        elif os.path.exists(LOGO_FILENAME):
+            st.image(LOGO_FILENAME, width=168)
+        else:
+            st.markdown(
+                """
+                <div style="width:136px; height:136px; line-height:136px; border-radius:50%;
+                            background:linear-gradient(135deg,#FF5C8B,#7A1F3D); color:white;
+                            font-size:52px; font-weight:800; text-align:center; margin:6px auto 12px auto;">
+                    F
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    # Hero card utama
+    st.markdown("""
+    <div class="finora-hero-card">
+        <div class="finora-hero-badge">FINORA AI • Financial & Audit Intelligence Platform</div>
+        <h1 class="finora-hero-title">FINORA AI</h1>
+        <p class="finora-hero-subtitle">
+            Platform cerdas terpadu untuk <b>mendeteksi anomali transaksi (Audit)</b>, menyusun <b>Kertas Kerja Audit (KKA)</b>,
+            mengevaluasi <b>Kesehatan Keuangan Perusahaan & Sektor Publik</b>, menganalisis <b>Arus Kas (PSAK 207)</b>,
+            serta memperdalam pemahaman melalui <b>75 materi FINORA Study</b> dan <b>Gemini AI</b>.
         </p>
+        <div class="finora-kpi-strip">
+            <div class="finora-kpi-pill">🔎 7 Modul Uji Anomali Audit</div>
+            <div class="finora-kpi-pill">📈 Rasio Swasta/Tbk & Pemda/BLU</div>
+            <div class="finora-kpi-pill">💧 PSAK 207 & Mutasi Kas</div>
+            <div class="finora-kpi-pill">📚 75 Materi Pembelajaran</div>
+            <div class="finora-kpi-pill">📄 Ekspor KKA PDF & Excel</div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("<h2 style='text-align: center; color: #7A1F3D; margin-bottom: 30px; font-weight: 700;'>Dua Senjata Utama FINORA</h2>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""<div style="background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF5C8B;"><div style="font-size: 3rem; margin-bottom: 15px;">🔎</div><h3 style="color: #7A1F3D; margin-bottom: 10px;">Audit Profesional</h3><p style="color: #555; font-size: 0.95rem;">Mendeteksi duplikasi, transaksi weekend, overbudget, outlier, dan anomali lainnya. Hasil siap diunduh dalam format KKA (PDF & Excel).</p></div>""", unsafe_allow_html=True)
-    with col2:
-        st.markdown("""<div style="background: white; padding: 30px 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #FF5C8B;"><div style="font-size: 3rem; margin-bottom: 15px;">📈</div><h3 style="color: #7A1F3D; margin-bottom: 10px;">Analisis Keuangan</h3><p style="color: #555; font-size: 0.95rem;">Hitung rasio (Likuiditas, Profitabilitas, Solvabilitas) dan dapatkan *insight* prospek bisnis/pemerintahan dari AI Financial Advisor.</p></div>""", unsafe_allow_html=True)
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
-    col_cta1, col_cta2, col_cta3 = st.columns([1, 2, 1])
-    with col_cta2:
-        st.markdown("""<style>.stButton > button { background: linear-gradient(135deg, #FF5C8B 0%, #7A1F3D 100%) !important; color: white !important; font-size: 1.3rem !important; padding: 20px 30px !important; border-radius: 12px !important; border: none !important; font-weight: 800 !important; box-shadow: 0 6px 20px rgba(255, 92, 139, 0.4) !important; transition: all 0.3s ease !important; width: 100%; }</style>""", unsafe_allow_html=True)
-        if st.button("🚀 START YOUR ANALYSIS", use_container_width=True):
+
+    # Seluruh fitur utama pada halaman depan
+    st.markdown("""
+    <div class="finora-section-head">
+        <h2>Fitur Lengkap FINORA AI</h2>
+        <p>Seluruh modul utama tersedia dan dapat langsung dibuka dari halaman depan maupun Dashboard.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    modules_data = [
+        {
+            "icon": "🔎",
+            "title": "Audit Profesional & KKA",
+            "desc": "Deteksi otomatis data kosong, duplikasi, transaksi weekend, kata kunci mencurigakan, nilai negatif, outlier IQR, dan overbudget. Lengkap dengan skor risiko, grafik, ekspor KKA (PDF & Excel), serta AI Audit Insights.",
+            "tags": "Skor Risiko • Bukti Audit • KKA PDF/Excel • AI",
+            "target": "Audit Profesional",
+            "btn": "Buka Audit Profesional →",
+        },
+        {
+            "icon": "📈",
+            "title": "Analisis Laporan Keuangan",
+            "desc": "Evaluasi laporan keuangan Perusahaan Swasta/Tbk maupun Pemerintahan/BLU. Hitung otomatis Current Ratio, NPM, ROA, ROE, DER serta Efektivitas, Efisiensi, Kemandirian, dan Pertumbuhan lengkap dengan AI Advisor.",
+            "tags": "Swasta/Tbk & Pemda/BLU • Rasio • Laporan PDF/Excel",
+            "target": "Analisis Keuangan",
+            "btn": "Buka Analisis Keuangan →",
+        },
+        {
+            "icon": "💧",
+            "title": "Cash Flow Intelligence (PSAK 207)",
+            "desc": "Analisis laporan arus kas multi-periode (Operasi, Investasi, Pendanaan) atau mutasi transaksi bank. Dilengkapi Free Cash Flow, rasio kas, tren bulanan, deteksi anomali IQR, rekonsiliasi saldo, dan AI Cash Flow Insights.",
+            "tags": "Operasi • Investasi • Pendanaan • Free Cash Flow",
+            "target": "Analisis Arus Kas",
+            "btn": "Buka Analisis Arus Kas →",
+        },
+        {
+            "icon": "📚",
+            "title": "FINORA Study (75 Materi)",
+            "desc": "Pusat belajar terstruktur berisi 75 materi lengkap (25 Audit Profesional, 25 Analisis Keuangan, dan 25 Analisis Arus Kas) dari level Dasar, Menengah, hingga Lanjutan dengan fitur pencarian dan filter level.",
+            "tags": "75 Materi • Dasar–Lanjutan • Pencarian Topik",
+            "target": "FINORA Study",
+            "btn": "Buka FINORA Study →",
+        },
+    ]
+
+    for row_start in (0, 2):
+        cols_row = st.columns(2)
+        for idx_offset in range(2):
+            m = modules_data[row_start + idx_offset]
+            with cols_row[idx_offset]:
+                st.markdown(f"""
+                <div class="finora-feature-card">
+                    <div>
+                        <div class="finora-feature-icon">{m['icon']}</div>
+                        <div class="finora-feature-title">{m['title']}</div>
+                        <p class="finora-feature-desc">{m['desc']}</p>
+                    </div>
+                    <div class="finora-feature-tags">{m['tags']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+                st.button(
+                    m["btn"],
+                    key=f"landing_open_{m['target']}",
+                    use_container_width=True,
+                    on_click=_landing_go_to,
+                    args=(m["target"],)
+                )
+        if row_start == 0:
+            st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
+
+    # Alur penggunaan singkat
+    st.markdown("""
+    <div class="finora-workflow-box">
+        <div style="text-align:center; margin-bottom:14px;">
+            <span style="font-size:16px; font-weight:800; color:#7A1F3D;">Alur Kerja Cepat di FINORA AI</span>
+        </div>
+    """, unsafe_allow_html=True)
+    s1, s2, s3, s4 = st.columns(4)
+    steps = [
+        ("Langkah 1", "Upload Excel / CSV", "Unggah data transaksi, laporan keuangan, atau arus kas (mendukung multi-sheet)."),
+        ("Langkah 2", "Pemetaan Otomatis", "Sistem mendeteksi header, kolom akun/nominal, dan periode secara otomatis."),
+        ("Langkah 3", "Analisis & AI Insight", "Jalankan pengujian audit, rasio keuangan, tren arus kas, dan tanya jawab AI."),
+        ("Langkah 4", "Unduh Laporan Resmi", "Ekspor hasil ke Kertas Kerja Audit (KKA) atau laporan Excel dan PDF siap pakai."),
+    ]
+    for col_s, (s_num, s_tit, s_dsc) in zip([s1, s2, s3, s4], steps):
+        with col_s:
+            st.markdown(f"""
+            <div class="finora-step-item">
+                <div class="finora-step-num">{s_num}</div>
+                <div class="finora-step-title">{s_tit}</div>
+                <p class="finora-step-desc">{s_dsc}</p>
+            </div>
+            """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Tombol CTA utama masuk ke Dashboard
+    _, cta_mid, _ = st.columns([1, 2, 1])
+    with cta_mid:
+        st.markdown('<div class="finora-cta-btn">', unsafe_allow_html=True)
+        if st.button("🚀 MASUK KE DASHBOARD UTAMA", use_container_width=True, key="landing_start_dashboard"):
             st.session_state.app_started = True
+            st.session_state.selected_nav = "Dashboard"
+            st.session_state.nav_radio = "Dashboard"
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="finora-footer-note">
+        ⚠️ Hasil deteksi anomali, rasio, dan insight AI merupakan alat bantu analisis—tetap lakukan verifikasi bukti & dokumen sumber.
+    </div>
+    """, unsafe_allow_html=True)
 
 def main():
     if "app_started" not in st.session_state:
